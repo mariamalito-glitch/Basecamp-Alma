@@ -9,9 +9,35 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Basecamp Alma" />
   <link rel="manifest" href="/manifest.json" />
-  <link rel="icon" href="/icon-192.png" />
-  <link rel="apple-touch-icon" href="/icon-192.png" />
   <title>🔧 Basecamp Alma</title>
+  <script>
+    // Genera el ícono dinámicamente con canvas
+    window.addEventListener('DOMContentLoaded', () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 192; canvas.height = 192;
+      const ctx = canvas.getContext('2d');
+      // Fondo azul
+      ctx.fillStyle = '#0C447C';
+      ctx.beginPath();
+      ctx.roundRect(0,0,192,192,36);
+      ctx.fill();
+      // Emoji 🔧
+      ctx.font = '110px serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🔧', 96, 106);
+      // Aplicar como favicon
+      const link = document.createElement('link');
+      link.rel = 'icon'; link.type = 'image/png';
+      link.href = canvas.toDataURL();
+      document.head.appendChild(link);
+      // Apple touch icon
+      const apple = document.createElement('link');
+      apple.rel = 'apple-touch-icon';
+      apple.href = canvas.toDataURL();
+      document.head.appendChild(apple);
+    });
+  </script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #f4f3ef; color: #222; font-family: system-ui, sans-serif; }
