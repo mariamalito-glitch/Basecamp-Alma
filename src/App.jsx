@@ -33,7 +33,7 @@ const PERSONAL   = ["Yo","Personal semanal (4h)","Personal semanal (8h)","Person
 const MONTHS     = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
 const PAD      = n => String(n).padStart(2,"0");
-const FMT_DATE = d => { const [y,m,dd]=d.split("-"); return `${dd}/${m}/${y}`; };
+const FMT_DATE = d => { if(!d) return "—"; const [y,m,dd]=d.split("-"); return `${dd}/${m}/${y}`; };
 const TODAY    = new Date().toISOString().slice(0,10);
 
 const S = {
@@ -53,45 +53,29 @@ const estStyle = e => {
   return {bg:"#F1EFE8",text:"#5F5E5A",border:"#B4B2A9"};
 };
 
-// ── Clasificador por reglas ───────────────────────────────────────────────────
+// ── Clasificador por reglas ────────────────────────────────────────────────────
 function clasificarReporte(texto) {
   const t = (texto||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
-  const noMante = ["olvido","olvidó","olvide","perdido","perdida","objeto","ropa","vajilla",
-    "vaso","vasos","taza","plato","cubierto","falta reponer","reponer","amenities",
-    "toalla falta","sabana","papel higienico","shampoo","jabon","sucio","sucia",
-    "limpieza","mancha","olor","basura","mugre"];
+  const noMante = ["olvido","olvide","perdido","perdida","objeto","ropa","vajilla","vaso","vasos",
+    "taza","plato","cubierto","falta reponer","reponer","amenities","toalla falta","sabana",
+    "papel higienico","shampoo","jabon","sucio","sucia","limpieza","mancha","olor","basura","mugre"];
   for(const p of noMante) if(t.includes(p)) return { esMantenimiento:false };
 
-  const electrica = ["luz","electricidad","electrico","electrica","disyuntor","tomacorriente",
-    "enchufe","lampara","foco","cortocircuito","tablero","no anda la luz","no hay luz",
-    "sin luz","calefactor","aire acondicionado","no enfria","no calienta"];
-  for(const p of electrica) if(t.includes(p)) return { esMantenimiento:true, tipo:"Eléctrica",
-    urgencia: t.includes("sin luz")||t.includes("no hay luz")?"Urgente":"Media" };
+  const checks = [
+    { words:["sin luz","no hay luz","no anda la luz","disyuntor","tablero","cortocircuito","tomacorriente","enchufe","lampara","electricidad","electrico","calefactor","aire acondicionado","no enfria","no calienta"], tipo:"Eléctrica", urgFn: w => w==="sin luz"||w==="no hay luz" },
+    { words:["sin agua","no sale agua","perdida de agua","inundacion","canilla","caño","pileta","inodoro","ducha","gotea","presion","desague","humedad","calefon","termotanque","baño"], tipo:"Sanitaria", urgFn: w => w==="sin agua"||w==="no sale agua"||w==="inundacion" },
+    { words:["olor a gas","escape de gas","gas","garrafa","hornalla","cocina no anda"], tipo:"Gas", urgFn: w => w==="olor a gas"||w==="escape de gas" },
+    { words:["caja fuerte","cerradura","no abre","no cierra","traba","cerrojo","puerta trabada","candado","pomo","llave"], tipo:"Cerrajería", urgFn: ()=>false },
+    { words:["caido","roto","rajado","rajadura","grieta","pared","techo","piso","baldosa","azulejo","estante","madera","bisagra","ventana rota","vidrio","persiana","espejo"], tipo:"Albañilería", urgFn: ()=>false },
+    { words:["reja","baranda","barandal","oxidado"], tipo:"Herrería", urgFn: ()=>false },
+    { words:["no funciona","no anda","no sirve","daño","dañado","falla","desprendido","caída"], tipo:"General", urgFn: ()=>false },
+  ];
 
-  const sanitaria = ["agua","canilla","caño","pileta","inodoro","ducha","perdida de agua",
-    "gotea","no sale agua","sin agua","presion","desague","humedad","calefon","termotanque","baño"];
-  for(const p of sanitaria) if(t.includes(p)) return { esMantenimiento:true, tipo:"Sanitaria",
-    urgencia: t.includes("sin agua")||t.includes("no sale agua")?"Urgente":"Media" };
-
-  const gas = ["gas","garrafa","hornalla","cocina no anda","olor a gas","escape de gas"];
-  for(const p of gas) if(t.includes(p)) return { esMantenimiento:true, tipo:"Gas",
-    urgencia: t.includes("olor a gas")||t.includes("escape")?"Urgente":"Media" };
-
-  const cerrajeria = ["cerradura","llave","no abre","no cierra","traba","cerrojo",
-    "caja fuerte","puerta trabada","candado","pomo"];
-  for(const p of cerrajeria) if(t.includes(p)) return { esMantenimiento:true, tipo:"Cerrajería", urgencia:"Media" };
-
-  const albanileria = ["caido","roto","rajado","rajadura","grieta","pared","techo","piso",
-    "baldosa","azulejo","estante","madera","bisagra","ventana rota","vidrio","persiana","espejo"];
-  for(const p of albanileria) if(t.includes(p)) return { esMantenimiento:true, tipo:"Albañilería", urgencia:"Baja" };
-
-  const herreria = ["reja","baranda","barandal","metal","oxidado"];
-  for(const p of herreria) if(t.includes(p)) return { esMantenimiento:true, tipo:"Herrería", urgencia:"Baja" };
-
-  const general = ["no funciona","no anda","roto","rota","no sirve","daño","dañado",
-    "falla","problema con","desprendido","caída","caido"];
-  for(const p of general) if(t.includes(p)) return { esMantenimiento:true, tipo:"General", urgencia:"Media" };
-
+  for(const {words,tipo,urgFn} of checks) {
+    for(const w of words) {
+      if(t.includes(w)) return { esMantenimiento:true, tipo, urgencia: urgFn(w)?"Urgente":"Media" };
+    }
+  }
   return { esMantenimiento:false };
 }
 
@@ -113,24 +97,10 @@ async function loadFirebase() {
   firebaseLoaded = true;
 }
 
-async function almaSet(k,v) {
-  const {doc,setDoc}=window._fb;
-  await setDoc(doc(dbAlma,"alma",String(k)),{value:JSON.stringify(v)});
-}
-async function almaGet(k) {
-  const {doc,getDoc}=window._fb;
-  const s=await getDoc(doc(dbAlma,"alma",String(k)));
-  return s.exists()?JSON.parse(s.data().value):null;
-}
-function almaListen(k,cb) {
-  const {doc,onSnapshot}=window._fb;
-  return onSnapshot(doc(dbAlma,"alma",String(k)),s=>{cb(s.exists()?JSON.parse(s.data().value):null);});
-}
-async function limpiezaGet(k) {
-  const {doc,getDoc}=window._fb;
-  const s=await getDoc(doc(dbLimp,"limpiezas",String(k)));
-  return s.exists()?JSON.parse(s.data().value):null;
-}
+async function almaSet(k,v) { const {doc,setDoc}=window._fb; await setDoc(doc(dbAlma,"alma",String(k)),{value:JSON.stringify(v)}); }
+async function almaGet(k) { const {doc,getDoc}=window._fb; const s=await getDoc(doc(dbAlma,"alma",String(k))); return s.exists()?JSON.parse(s.data().value):null; }
+function almaListen(k,cb) { const {doc,onSnapshot}=window._fb; return onSnapshot(doc(dbAlma,"alma",String(k)),s=>{cb(s.exists()?JSON.parse(s.data().value):null);}); }
+async function limpiezaGet(k) { const {doc,getDoc}=window._fb; const s=await getDoc(doc(dbLimp,"limpiezas",String(k))); return s.exists()?JSON.parse(s.data().value):null; }
 
 // ── Modal genérico ─────────────────────────────────────────────────────────────
 function Modal({onClose,children,wide}) {
@@ -144,16 +114,15 @@ function Modal({onClose,children,wide}) {
   );
 }
 
-// ── Modal Historial de Depto ───────────────────────────────────────────────────
+// ── Modal Historial Depto ─────────────────────────────────────────────────────
 function ModalDepto({edificio,depto,tareas,onClose}) {
   const todas = tareas.filter(t=>t.edificio===edificio&&t.depto===depto);
   const activas = todas.filter(t=>t.estado!=="Completada");
   const completadas = todas.filter(t=>t.estado==="Completada");
   return (
     <div onClick={e=>{if(e.target===e.currentTarget)onClose();}}
-      style={{position:"fixed",inset:0,background:"rgba(8,20,45,0.75)",zIndex:3000,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
-      <div style={{background:"#1C2B45",borderRadius:20,padding:"2rem",width:"100%",maxWidth:620,maxHeight:"88vh",overflowY:"auto",boxShadow:"0 16px 64px rgba(0,0,0,0.5)",border:"2px solid #2E4A6E"}}>
-        {/* Header */}
+      style={{position:"fixed",inset:0,background:"rgba(8,20,45,0.8)",zIndex:3000,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
+      <div style={{background:"#1C2B45",borderRadius:20,padding:"2rem",width:"100%",maxWidth:620,maxHeight:"88vh",overflowY:"auto",boxShadow:"0 16px 64px rgba(0,0,0,0.6)",border:"2px solid #2E4A6E"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1.5rem"}}>
           <div>
             <p style={{margin:0,fontSize:20,fontWeight:700,color:"#fff"}}>🏠 {edificio} · Dpto {depto}</p>
@@ -162,55 +131,45 @@ function ModalDepto({edificio,depto,tareas,onClose}) {
           <button onClick={onClose} style={{background:"rgba(255,255,255,0.1)",border:"none",borderRadius:10,width:36,height:36,fontSize:18,cursor:"pointer",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
         </div>
 
-        {/* Activas */}
         {activas.length>0&&(
           <div style={{marginBottom:"1.5rem"}}>
-            <p style={{margin:"0 0 0.75rem",fontSize:13,fontWeight:700,color:"#F09595",textTransform:"uppercase",letterSpacing:"0.05em"}}>🔴 Tareas activas ({activas.length})</p>
+            <p style={{margin:"0 0 0.75rem",fontSize:12,fontWeight:700,color:"#F09595",textTransform:"uppercase",letterSpacing:"0.06em"}}>🔴 Tareas activas ({activas.length})</p>
             {activas.map(t=>{
-              const urg=urgStyle(t.urgencia);
-              const est=estStyle(t.estado);
+              const urg=urgStyle(t.urgencia); const est=estStyle(t.estado);
               return (
-                <div key={t.id} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:12,padding:"0.875rem 1rem",marginBottom:"0.5rem",borderLeft:`4px solid ${urg.border}`}}>
+                <div key={t.id} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:12,padding:"0.875rem 1rem",marginBottom:"0.5rem",borderLeft:`4px solid ${urg.border}`}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,flexWrap:"wrap"}}>
                     <p style={{margin:0,fontWeight:600,fontSize:14,color:"#fff"}}>{t.titulo}</p>
-                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                    <div style={{display:"flex",gap:6}}>
                       <span style={{...S.tag(urg.bg,urg.text,urg.border),fontSize:11}}>{t.urgencia}</span>
                       <span style={{...S.tag(est.bg,est.text,est.border),fontSize:11}}>{t.estado}</span>
                     </div>
                   </div>
-                  <p style={{margin:"4px 0 0",fontSize:12,color:"#8BAFD4"}}>
-                    🔧 {t.tipo} &nbsp;|&nbsp; 📅 {FMT_DATE(t.fecha)} &nbsp;|&nbsp; 👤 {t.asignado}
-                  </p>
-                  {t.origen==="reporte"&&<p style={{margin:"4px 0 0",fontSize:11,color:"#FFB74D"}}>🔗 Migrado desde reporte</p>}
-                  {t.fotoReporte&&<img src={t.fotoReporte} alt="foto reporte" style={{marginTop:8,maxWidth:180,borderRadius:8,border:"1px solid rgba(255,255,255,0.15)"}}/>}
+                  <p style={{margin:"4px 0 0",fontSize:12,color:"#8BAFD4"}}>🔧 {t.tipo} &nbsp;|&nbsp; 📅 {FMT_DATE(t.fecha)} &nbsp;|&nbsp; 👤 {t.asignado}</p>
+                  {t.origen==="reporte"&&<p style={{margin:"3px 0 0",fontSize:11,color:"#FFB74D"}}>🔗 Migrado desde reporte</p>}
+                  {t.fotoReporte&&<img src={t.fotoReporte} alt="foto" style={{marginTop:8,maxWidth:180,borderRadius:8,border:"1px solid rgba(255,255,255,0.15)",cursor:"zoom-in"}} onClick={()=>window.open(t.fotoReporte,"_blank")}/>}
                 </div>
               );
             })}
           </div>
         )}
 
-        {/* Completadas */}
         {completadas.length>0&&(
           <div>
-            <p style={{margin:"0 0 0.75rem",fontSize:13,fontWeight:700,color:"#97C459",textTransform:"uppercase",letterSpacing:"0.05em"}}>✅ Historial completado ({completadas.length})</p>
+            <p style={{margin:"0 0 0.75rem",fontSize:12,fontWeight:700,color:"#97C459",textTransform:"uppercase",letterSpacing:"0.06em"}}>✅ Historial completado ({completadas.length})</p>
             {completadas.map(t=>(
-              <div key={t.id} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,padding:"0.75rem 1rem",marginBottom:"0.5rem",borderLeft:"4px solid #97C459"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                  <p style={{margin:0,fontWeight:500,fontSize:14,color:"#d0e0f0",textDecoration:"line-through",opacity:0.8}}>{t.titulo}</p>
-                  <span style={{fontSize:11,color:"#97C459",fontWeight:600}}>✓ Completada</span>
-                </div>
-                <p style={{margin:"4px 0 0",fontSize:12,color:"#6A8FAF"}}>
-                  🔧 {t.tipo} &nbsp;|&nbsp; 📅 {FMT_DATE(t.fecha)}{t.fechaFin?` → ${FMT_DATE(t.fechaFin)}`:""} &nbsp;|&nbsp; 👤 {t.asignado}
-                </p>
-                {t.fotoReporte&&<img src={t.fotoReporte} alt="foto" style={{marginTop:6,maxWidth:140,borderRadius:6,border:"1px solid rgba(255,255,255,0.1)"}}/>}
+              <div key={t.id} style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:12,padding:"0.75rem 1rem",marginBottom:"0.5rem",borderLeft:"4px solid #97C459"}}>
+                <p style={{margin:0,fontWeight:500,fontSize:14,color:"#b0c8e0",textDecoration:"line-through",opacity:0.8}}>{t.titulo}</p>
+                <p style={{margin:"4px 0 0",fontSize:12,color:"#6A8FAF"}}>🔧 {t.tipo} &nbsp;|&nbsp; 📅 {FMT_DATE(t.fecha)}{t.fechaFin?` → ${FMT_DATE(t.fechaFin)}`:""} &nbsp;|&nbsp; 👤 {t.asignado}</p>
+                {t.fotoReporte&&<img src={t.fotoReporte} alt="foto" style={{marginTop:6,maxWidth:120,borderRadius:6,border:"1px solid rgba(255,255,255,0.1)",cursor:"zoom-in"}} onClick={()=>window.open(t.fotoReporte,"_blank")}/>}
               </div>
             ))}
           </div>
         )}
 
         {todas.length===0&&(
-          <div style={{textAlign:"center",padding:"2rem 0",color:"#8BAFD4"}}>
-            <p style={{fontSize:32,marginBottom:8}}>🏠</p>
+          <div style={{textAlign:"center",padding:"2.5rem 0",color:"#8BAFD4"}}>
+            <p style={{fontSize:36,marginBottom:8}}>🏠</p>
             <p style={{fontSize:15}}>Sin registros para este departamento</p>
           </div>
         )}
@@ -230,10 +189,86 @@ function OrigenBadge({origen}) {
   return <span style={{...S.tag(c.bg,c.color,c.border),fontSize:11}}>{c.label}</span>;
 }
 
+// ── Tarjeta Tarea ─────────────────────────────────────────────────────────────
+function TareaCard({t,onEdit,onEstado,onDelete,onComentario}) {
+  const urg=urgStyle(t.urgencia);
+  const est=estStyle(t.estado);
+  const [open,setOpen]=useState(false);
+  const [comentario,setComentario]=useState(t.comentario||"");
+  return (
+    <div style={{...S.card,borderLeft:`5px solid ${urg.border}`}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:6}}>
+            {t.huespedAlerta&&<span style={S.tag("#FAECE7","#993C1D","#F5C4B3")}>⚠ Huésped</span>}
+            <span style={S.tag(urg.bg,urg.text,urg.border)}>{t.urgencia}</span>
+            <span style={S.tag(est.bg,est.text,est.border)}>{t.estado}</span>
+            <span style={S.tag("#F1EFE8","#5F5E5A","#B4B2A9")}>{t.tipo}</span>
+            {t.recurrente&&<span style={S.tag("#E6F1FB","#185FA5","#85B7EB")}>🔁 Mensual</span>}
+            {t.limpieza&&<span style={S.tag("#EEEDFE","#534AB7","#AFA9EC")}>🧹 Limpieza</span>}
+            <OrigenBadge origen={t.origen}/>
+          </div>
+          <p style={{margin:"0 0 3px",fontWeight:600,fontSize:16}}>{t.titulo}</p>
+          <p style={{margin:0,fontSize:13,color:"#888"}}>
+            🏢 {t.edificio} · {t.depto||"—"} &nbsp;|&nbsp; 👤 {t.asignado} &nbsp;|&nbsp; 📅 {FMT_DATE(t.fecha)}{t.fechaFin?` → ${FMT_DATE(t.fechaFin)}`:""}
+          </p>
+          {t.materiales&&<p style={{margin:"2px 0 0",fontSize:13,color:"#888"}}>🔧 {t.materiales}</p>}
+          {t.fotoReporte&&(
+            <img src={t.fotoReporte} alt="foto reporte" style={{marginTop:8,maxWidth:160,borderRadius:8,border:"1px solid #e2e0d8",cursor:"zoom-in",display:"block"}}
+              onClick={()=>window.open(t.fotoReporte,"_blank")}/>
+          )}
+        </div>
+        <div style={{display:"flex",gap:6,flexShrink:0}}>
+          <button onClick={()=>setOpen(!open)} style={{...S.btn(),padding:"6px 10px"}}>{open?"▲":"▼"}</button>
+          <button onClick={()=>onEdit(t)} style={{...S.btn(),padding:"6px 10px"}}>✏️</button>
+          <button onClick={()=>onDelete(t.id)} style={{...S.btn("#FCEBEB","#A32D2D"),padding:"6px 10px",border:"1px solid #F09595"}}>🗑️</button>
+        </div>
+      </div>
+
+      {open&&(
+        <div style={{marginTop:"0.75rem",paddingTop:"0.75rem",borderTop:"1px solid #ebe9e2"}}>
+          {t.descripcion&&<p style={{fontSize:14,margin:"0 0 0.75rem",color:"#666"}}>{t.descripcion}</p>}
+
+          {/* Comentario interno editable */}
+          <div style={{marginBottom:"0.75rem"}}>
+            <label style={S.label}>💬 Comentario interno</label>
+            <textarea
+              style={{...S.input,resize:"vertical",fontSize:13}}
+              rows={2}
+              value={comentario}
+              onChange={e=>setComentario(e.target.value)}
+              placeholder="Notas internas, observaciones..."/>
+            <button onClick={()=>onComentario(t.id,comentario)} style={{...S.btn("#185FA5","#fff"),marginTop:6,padding:"5px 14px",fontSize:12}}>
+              💾 Guardar comentario
+            </button>
+          </div>
+
+          <div style={{display:"flex",gap:"0.5rem",flexWrap:"wrap",marginBottom:"0.75rem"}}>
+            {t.estado!=="En curso"&&t.estado!=="Completada"&&<button onClick={()=>onEstado(t.id,"En curso")} style={S.btn("#185FA5","#fff")}>▶ Iniciar</button>}
+            {t.estado==="En curso"&&<>
+              <button onClick={()=>onEstado(t.id,"Completada")} style={S.btn("#3B6D11","#fff")}>✔ Finalizar</button>
+              <button onClick={()=>onEstado(t.id,"Pausada")} style={S.btn("#854F0B","#fff")}>⏸ Pausar</button>
+            </>}
+            {t.estado==="Pausada"&&<button onClick={()=>onEstado(t.id,"En curso")} style={S.btn("#185FA5","#fff")}>▶ Reanudar</button>}
+            {t.estado==="Completada"&&<button onClick={()=>onEstado(t.id,"Pendiente")} style={S.btn()}>↩ Reabrir</button>}
+          </div>
+
+          {t.historial?.length>0&&(
+            <div style={{background:"#f7f6f2",borderRadius:8,padding:"0.5rem 0.75rem"}}>
+              <p style={{margin:"0 0 4px",fontSize:12,fontWeight:500,color:"#888"}}>REGISTRO</p>
+              {t.historial.map((h,i)=><p key={i} style={{margin:"2px 0",fontSize:12,color:"#aaa"}}>• {h}</p>)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Formulario Tarea ──────────────────────────────────────────────────────────
 function TareaForm({tarea,edificios,tipos,onSave,onClose}) {
   const blank={titulo:"",edificio:"QDB",depto:"",tipo:"General",asignado:"Yo",urgencia:"Baja",
-    estado:"Pendiente",fecha:TODAY,fechaFin:"",descripcion:"",materiales:"",
+    estado:"Pendiente",fecha:TODAY,fechaFin:"",descripcion:"",materiales:"",comentario:"",
     limpieza:false,recurrente:false,huespedAlerta:false,historial:[]};
   const [f,setF]=useState(tarea?{...tarea}:blank);
   const set=(k,v)=>setF(p=>({...p,[k]:v}));
@@ -245,8 +280,7 @@ function TareaForm({tarea,edificios,tipos,onSave,onClose}) {
         <button onClick={onClose} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#888"}}>✕</button>
       </div>
       <div style={{display:"grid",gap:"1rem"}}>
-        <div>
-          <label style={S.label}>Título *</label>
+        <div><label style={S.label}>Título *</label>
           <input style={S.input} value={f.titulo} onChange={e=>set("titulo",e.target.value)} placeholder="Descripción breve"/>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"1rem"}}>
@@ -296,7 +330,10 @@ function TareaForm({tarea,edificios,tipos,onSave,onClose}) {
           <input style={S.input} value={f.materiales} onChange={e=>set("materiales",e.target.value)} placeholder="Ej: pintura blanca, rodillo..."/>
         </div>
         <div><label style={S.label}>Descripción / Notas</label>
-          <textarea style={{...S.input,resize:"vertical"}} rows={3} value={f.descripcion} onChange={e=>set("descripcion",e.target.value)}/>
+          <textarea style={{...S.input,resize:"vertical"}} rows={2} value={f.descripcion} onChange={e=>set("descripcion",e.target.value)}/>
+        </div>
+        <div><label style={S.label}>💬 Comentario interno</label>
+          <textarea style={{...S.input,resize:"vertical"}} rows={2} value={f.comentario||""} onChange={e=>set("comentario",e.target.value)} placeholder="Notas internas..."/>
         </div>
         <div style={{display:"flex",gap:"2rem",flexWrap:"wrap",padding:"0.75rem 1rem",background:"#f7f6f2",borderRadius:10}}>
           {[["limpieza","🧹 Requiere limpieza"],["recurrente","🔁 Mensual"],["huespedAlerta","⚠️ Huésped presente"]].map(([k,lbl])=>(
@@ -312,65 +349,6 @@ function TareaForm({tarea,edificios,tipos,onSave,onClose}) {
           {tarea?"Guardar cambios":"Crear tarea"}
         </button>
       </div>
-    </div>
-  );
-}
-
-// ── Tarjeta Tarea ─────────────────────────────────────────────────────────────
-function TareaCard({t,onEdit,onEstado,onDelete}) {
-  const urg=urgStyle(t.urgencia);
-  const est=estStyle(t.estado);
-  const [open,setOpen]=useState(false);
-  return (
-    <div style={{...S.card,borderLeft:`5px solid ${urg.border}`}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:6}}>
-            {t.huespedAlerta&&<span style={S.tag("#FAECE7","#993C1D","#F5C4B3")}>⚠ Huésped</span>}
-            <span style={S.tag(urg.bg,urg.text,urg.border)}>{t.urgencia}</span>
-            <span style={S.tag(est.bg,est.text,est.border)}>{t.estado}</span>
-            <span style={S.tag("#F1EFE8","#5F5E5A","#B4B2A9")}>{t.tipo}</span>
-            {t.recurrente&&<span style={S.tag("#E6F1FB","#185FA5","#85B7EB")}>🔁 Mensual</span>}
-            {t.limpieza&&<span style={S.tag("#EEEDFE","#534AB7","#AFA9EC")}>🧹 Limpieza</span>}
-            <OrigenBadge origen={t.origen}/>
-          </div>
-          <p style={{margin:"0 0 3px",fontWeight:500,fontSize:16}}>{t.titulo}</p>
-          <p style={{margin:0,fontSize:13,color:"#888"}}>
-            🏢 {t.edificio} · {t.depto||"—"} &nbsp;|&nbsp; 👤 {t.asignado} &nbsp;|&nbsp; 📅 {FMT_DATE(t.fecha)}{t.fechaFin?` → ${FMT_DATE(t.fechaFin)}`:""}
-          </p>
-          {t.materiales&&<p style={{margin:"2px 0 0",fontSize:13,color:"#888"}}>🔧 {t.materiales}</p>}
-          {/* Foto del reporte si existe */}
-          {t.fotoReporte&&(
-            <img src={t.fotoReporte} alt="foto reporte" style={{marginTop:8,maxWidth:160,borderRadius:8,border:"1px solid #e2e0d8",cursor:"zoom-in"}}
-              onClick={()=>window.open(t.fotoReporte,"_blank")}/>
-          )}
-        </div>
-        <div style={{display:"flex",gap:6,flexShrink:0}}>
-          <button onClick={()=>setOpen(!open)} style={{...S.btn(),padding:"6px 10px"}}>{open?"▲":"▼"}</button>
-          <button onClick={()=>onEdit(t)} style={{...S.btn(),padding:"6px 10px"}}>✏️</button>
-          <button onClick={()=>onDelete(t.id)} style={{...S.btn("#FCEBEB","#A32D2D"),padding:"6px 10px",border:"1px solid #F09595"}}>🗑️</button>
-        </div>
-      </div>
-      {open&&(
-        <div style={{marginTop:"0.75rem",paddingTop:"0.75rem",borderTop:"1px solid #ebe9e2"}}>
-          {t.descripcion&&<p style={{fontSize:14,margin:"0 0 0.75rem",color:"#666"}}>{t.descripcion}</p>}
-          <div style={{display:"flex",gap:"0.5rem",flexWrap:"wrap",marginBottom:"0.75rem"}}>
-            {t.estado!=="En curso"&&t.estado!=="Completada"&&<button onClick={()=>onEstado(t.id,"En curso")} style={S.btn("#185FA5","#fff")}>▶ Iniciar</button>}
-            {t.estado==="En curso"&&<>
-              <button onClick={()=>onEstado(t.id,"Completada")} style={S.btn("#3B6D11","#fff")}>✔ Finalizar</button>
-              <button onClick={()=>onEstado(t.id,"Pausada")} style={S.btn("#854F0B","#fff")}>⏸ Pausar</button>
-            </>}
-            {t.estado==="Pausada"&&<button onClick={()=>onEstado(t.id,"En curso")} style={S.btn("#185FA5","#fff")}>▶ Reanudar</button>}
-            {t.estado==="Completada"&&<button onClick={()=>onEstado(t.id,"Pendiente")} style={S.btn()}>↩ Reabrir</button>}
-          </div>
-          {t.historial?.length>0&&(
-            <div style={{background:"#f7f6f2",borderRadius:8,padding:"0.5rem 0.75rem"}}>
-              <p style={{margin:"0 0 4px",fontSize:12,fontWeight:500,color:"#888"}}>REGISTRO</p>
-              {t.historial.map((h,i)=><p key={i} style={{margin:"2px 0",fontSize:12,color:"#aaa"}}>• {h}</p>)}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -439,17 +417,16 @@ export default function App() {
   const [loading,setLoading]=useState(true);
   const [toast,setToast]=useState(null);
   const [procesadosIds,setProcesadosIds]=useState(new Set());
-  const [deptoModal,setDeptoModal]=useState(null); // {edificio, depto}
+  const [deptoModal,setDeptoModal]=useState(null);
 
   const nextId=useRef(Date.now());
   const unsubscribers=useRef([]);
   const procesadosRef=useRef(new Set());
-  const tareasRef=useRef([]);
   const mesKey=new Date().toISOString().slice(0,7);
 
   const showToast=(msg,tipo="ok")=>{setToast({msg,tipo});setTimeout(()=>setToast(null),4000);};
 
-  const saveTareas=useCallback(async v=>{setTareasState(v);tareasRef.current=v;try{await almaSet("alma_tasks",v);}catch(e){console.error(e);};},[]);
+  const saveTareas=useCallback(async v=>{setTareasState(v);try{await almaSet("alma_tasks",v);}catch(e){console.error(e);};},[]);
   const saveEdificios=useCallback(async v=>{setEdificiosState(v);try{await almaSet("alma_edificios",v);}catch(e){console.error(e);};},[]);
   const saveTipos=useCallback(async v=>{setTiposState(v);try{await almaSet("alma_tipos",v);}catch(e){console.error(e);};},[]);
   const saveMensual=useCallback(async v=>{setMensualTareas(v);try{await almaSet("alma_mensual",v);}catch(e){console.error(e);};},[]);
@@ -461,12 +438,12 @@ export default function App() {
         await loadFirebase();
         const [t,e,ti,m,proc]=await Promise.all([almaGet("alma_tasks"),almaGet("alma_edificios"),almaGet("alma_tipos"),almaGet("alma_mensual"),almaGet("alma_procesados")]);
         if(!mounted) return;
-        if(t){setTareasState(t);tareasRef.current=t;}
+        if(t) setTareasState(t);
         if(e) setEdificiosState(e);
         if(ti) setTiposState(ti);
         if(m) setMensualTareas(m);
         if(proc){procesadosRef.current=new Set(proc);setProcesadosIds(new Set(proc));}
-        const u1=almaListen("alma_tasks",data=>{if(mounted&&data){setTareasState(data);tareasRef.current=data;}});
+        const u1=almaListen("alma_tasks",data=>{if(mounted&&data)setTareasState(data);});
         const u2=almaListen("alma_mensual",data=>{if(mounted&&data)setMensualTareas(data);});
         unsubscribers.current.push(u1,u2);
         setLoading(false);
@@ -482,53 +459,61 @@ export default function App() {
     try {
       const reportes=await limpiezaGet("lim_reports");
       if(!reportes||!Array.isArray(reportes)) return;
-      const nuevos=reportes.filter(r=>!procesadosRef.current.has(String(r.id))&&r.comentario?.trim());
+      const nuevos=reportes.filter(r=>r.comentario?.trim()&&!procesadosRef.current.has(String(r.id)));
       if(!nuevos.length) return;
+
+      // Cargar tareas actuales UNA sola vez antes del loop (evita duplicados)
+      let tareasActuales=await almaGet("alma_tasks")||[];
 
       for(const rep of nuevos) {
         if(procesadosRef.current.has(String(rep.id))) continue;
-        const resultado=clasificarReporte(rep.comentario);
+
+        // Marcar procesado ANTES de crear la tarea (evita duplicados en reproceso)
         procesadosRef.current.add(String(rep.id));
         const procArray=Array.from(procesadosRef.current);
         setProcesadosIds(new Set(procArray));
         await almaSet("alma_procesados",procArray);
 
-        if(resultado.esMantenimiento) {
-          // Extraer edificio y depto
-          let edificio="", depto="";
-          const dText=(rep.depto||"").trim();
-          const match=dText.match(/^(QDB|H475|qdb|h475)\s*(.+)$/i);
-          if(match){edificio=match[1].toUpperCase();depto=match[2].trim();}
-          else{edificio="H475";depto=dText;}
+        const resultado=clasificarReporte(rep.comentario);
+        if(!resultado.esMantenimiento) continue;
 
-          const nuevaTarea={
-            id:Date.now()+Math.random(),
-            titulo:capitalizar(rep.comentario.slice(0,60)),
-            edificio,depto,
-            tipo:resultado.tipo||"General",
-            asignado:"Yo",
-            urgencia:resultado.urgencia||"Media",
-            estado:"Pendiente",
-            fecha:rep.fecha||TODAY,
-            fechaFin:"",
-            descripcion:`Reportado por: ${rep.asignado||"Personal"}`,
-            materiales:"",
-            limpieza:false,recurrente:false,huespedAlerta:false,
-            historial:[`Migrada automáticamente el ${new Date().toLocaleDateString("es-AR")}`],
-            origen:"reporte",
-            reporteId:rep.id,
-            // Traer foto si existe
-            fotoReporte:rep.foto||null,
-          };
+        // Verificar que no exista ya una tarea con este reporteId
+        if(tareasActuales.some(t=>t.reporteId===rep.id)) continue;
 
-          const tareasActuales=await almaGet("alma_tasks")||[];
-          const nuevaLista=[...tareasActuales,nuevaTarea];
-          await almaSet("alma_tasks",nuevaLista);
-          setTareasState(nuevaLista);
-          tareasRef.current=nuevaLista;
-          showToast(`🔗 Nueva tarea: ${nuevaTarea.titulo}`);
-        }
+        let edificio="", depto="";
+        const dText=(rep.depto||"").trim();
+        const match=dText.match(/^(QDB|H475|qdb|h475)\s*(.+)$/i);
+        if(match){edificio=match[1].toUpperCase();depto=match[2].trim();}
+        else{edificio="H475";depto=dText;}
+
+        const nuevaTarea={
+          id:Date.now()+Math.random(),
+          titulo:capitalizar(rep.comentario.slice(0,60)),
+          edificio, depto,
+          tipo:resultado.tipo||"General",
+          asignado:"Yo",
+          urgencia:resultado.urgencia||"Media",
+          estado:"Pendiente",
+          fecha:rep.fecha||TODAY,
+          fechaFin:"",
+          descripcion:`Reportado por: ${rep.asignado||"Personal"}`,
+          materiales:"",
+          comentario:"",
+          limpieza:false, recurrente:false, huespedAlerta:false,
+          historial:[`Migrada automáticamente el ${new Date().toLocaleDateString("es-AR")}`],
+          origen:"reporte",
+          reporteId:rep.id,
+          fotoReporte:rep.foto||null,
+        };
+
+        tareasActuales=[...tareasActuales,nuevaTarea];
+        showToast(`🔗 Nueva tarea: ${nuevaTarea.titulo}`);
       }
+
+      // Guardar todo de una sola vez
+      await almaSet("alma_tasks",tareasActuales);
+      setTareasState(tareasActuales);
+
     } catch(e){console.error("Error reportes:",e);}
   },[]);
 
@@ -537,7 +522,7 @@ export default function App() {
     try {
       const limpTasks=await limpiezaGet("lim_tasks")||[];
       if(limpTasks.some(t=>t._almaId===tarea.id)) return;
-      const nueva={id:Date.now(),_almaId:tarea.id,depto:`${tarea.edificio} ${tarea.depto}`,fecha:tarea.fechaFin||tarea.fecha,tipo:"Otro",descripcion:`🔧 Post-mantenimiento: ${tarea.titulo}`,comentario:"Limpieza requerida tras mantenimiento",asignado:"",completado:false,ingresos:[],minutosOtro:null,libre:false,_origen:"basecamp_alma"};
+      const nueva={id:Date.now(),_almaId:tarea.id,depto:`${tarea.edificio} ${tarea.depto}`,fecha:tarea.fechaFin||tarea.fecha,tipo:"Otro",descripcion:`🔧 Post-mantenimiento: ${tarea.titulo}`,comentario:"Limpieza tras mantenimiento",asignado:"",completado:false,ingresos:[],minutosOtro:null,libre:false,_origen:"basecamp_alma"};
       const {doc,setDoc}=window._fb;
       await setDoc(doc(dbLimp,"limpiezas","lim_tasks"),{value:JSON.stringify([...limpTasks,nueva])});
       showToast("🧹 Tarea de limpieza enviada");
@@ -546,15 +531,26 @@ export default function App() {
 
   const saveTarea=useCallback(async f=>{
     let lista;
-    if(editando){lista=tareas.map(t=>t.id===editando.id?{...f,id:t.id,origen:t.origen,fotoReporte:t.fotoReporte,historial:[...(t.historial||[]],`Editada el ${new Date().toLocaleDateString("es-AR")}`]}:t);}
-    else{lista=[...tareas,{...f,id:nextId.current++,historial:[`Creada el ${new Date().toLocaleDateString("es-AR")}`]}];}
-    await saveTareas(lista);setEditando(null);
+    const histEntry=`Editada el ${new Date().toLocaleDateString("es-AR")}`;
+    if(editando){
+      lista=tareas.map(t=>{
+        if(t.id!==editando.id) return t;
+        const prevHist=t.historial||[];
+        return {...f,id:t.id,origen:t.origen,fotoReporte:t.fotoReporte,reporteId:t.reporteId,historial:[...prevHist,histEntry]};
+      });
+    } else {
+      const newT={...f,id:nextId.current++,historial:[`Creada el ${new Date().toLocaleDateString("es-AR")}`]};
+      lista=[...tareas,newT];
+    }
+    await saveTareas(lista);
+    setEditando(null);
   },[editando,tareas,saveTareas]);
 
   const cambiarEstado=useCallback(async(id,nuevoEstado)=>{
     const lista=tareas.map(t=>{
       if(t.id!==id) return t;
-      const updated={...t,estado:nuevoEstado,historial:[...(t.historial||[]),`${new Date().toLocaleDateString("es-AR")} — Estado: ${nuevoEstado}`]};
+      const prevHist=t.historial||[];
+      const updated={...t,estado:nuevoEstado,historial:[...prevHist,`${new Date().toLocaleDateString("es-AR")} — Estado: ${nuevoEstado}`]};
       if(nuevoEstado==="Completada"&&t.limpieza) enviarTareaLimpieza(updated);
       return updated;
     });
@@ -562,6 +558,12 @@ export default function App() {
   },[tareas,saveTareas,enviarTareaLimpieza]);
 
   const eliminarTarea=useCallback(async id=>{await saveTareas(tareas.filter(t=>t.id!==id));},[tareas,saveTareas]);
+
+  const guardarComentario=useCallback(async(id,comentario)=>{
+    const lista=tareas.map(t=>t.id===id?{...t,comentario}:t);
+    await saveTareas(lista);
+    showToast("💬 Comentario guardado");
+  },[tareas,saveTareas]);
 
   const tareasActivas=tareas.filter(t=>t.estado!=="Completada");
   const tareasComp=tareas.filter(t=>t.estado==="Completada");
@@ -592,8 +594,8 @@ export default function App() {
   if(loading) return (
     <div style={{fontFamily:"system-ui,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"#f4f3ef"}}>
       <div style={{fontSize:48,marginBottom:16}}>🔧</div>
-      <p style={{fontSize:18,fontWeight:700,color:"#185FA5"}}>Basecamp Alma</p>
-      <p style={{color:"#888",fontSize:14,marginTop:4}}>Conectando con Firebase...</p>
+      <p style={{fontSize:18,fontWeight:700,color:"#185FA5"}}>AlmaDesk</p>
+      <p style={{color:"#888",fontSize:14,marginTop:4}}>Conectando...</p>
       <div style={{width:36,height:36,border:"4px solid #E6F1FB",borderTop:"4px solid #185FA5",borderRadius:"50%",animation:"spin 1s linear infinite",marginTop:20}}/>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
@@ -603,16 +605,15 @@ export default function App() {
     <div style={{fontFamily:"system-ui,sans-serif",maxWidth:960,margin:"0 auto",paddingBottom:"3rem",background:"#f4f3ef",minHeight:"100vh"}}>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
 
-      {toast&&<div style={{position:"fixed",top:14,right:14,zIndex:9999,background:toast.tipo==="err"?"#c0392b":"#2e9c5a",color:"#fff",borderRadius:10,padding:"10px 18px",fontSize:14,fontWeight:600,boxShadow:"0 4px 18px rgba(0,0,0,.2)",maxWidth:380}}>{toast.msg}</div>}
+      {toast&&<div style={{position:"fixed",top:14,right:14,zIndex:9999,background:toast.tipo==="err"?"#c0392b":"#185FA5",color:"#fff",borderRadius:10,padding:"10px 18px",fontSize:14,fontWeight:600,boxShadow:"0 4px 18px rgba(0,0,0,.2)",maxWidth:380}}>{toast.msg}</div>}
 
-      {/* Modal historial depto */}
       {deptoModal&&<ModalDepto edificio={deptoModal.edificio} depto={deptoModal.depto} tareas={tareas} onClose={()=>setDeptoModal(null)}/>}
 
       {/* Header */}
       <div style={{background:"linear-gradient(135deg,#0C447C,#185FA5)",padding:"1.25rem 2rem",borderRadius:"0 0 20px 20px",marginBottom:"1.25rem"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:"1rem"}}>
           <div>
-            <p style={{margin:0,fontWeight:700,fontSize:24,color:"#fff",letterSpacing:"-0.5px"}}>🔧 Basecamp Alma</p>
+            <p style={{margin:0,fontWeight:700,fontSize:24,color:"#fff",letterSpacing:"-0.5px"}}>🔧 AlmaDesk</p>
             <p style={{margin:0,fontSize:13,color:"rgba(255,255,255,0.75)"}}>
               Alma Rentals · {new Date().toLocaleDateString("es-AR",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
             </p>
@@ -664,7 +665,6 @@ export default function App() {
             </div>
 
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem"}}>
-              {/* Urgentes */}
               <div style={S.section}>
                 <p style={{margin:"0 0 0.75rem",fontWeight:600,fontSize:15,color:"#A32D2D"}}>🔴 Urgentes activas</p>
                 {urgentes.length===0?<p style={{color:"#888",fontSize:14}}>Sin urgencias.</p>:urgentes.map(t=>(
@@ -674,7 +674,6 @@ export default function App() {
                   </div>
                 ))}
               </div>
-              {/* Huésped */}
               <div style={S.section}>
                 <p style={{margin:"0 0 0.75rem",fontWeight:600,fontSize:15,color:"#854F0B"}}>⚠️ Con huésped</p>
                 {huesped.length===0?<p style={{color:"#888",fontSize:14}}>Sin alertas.</p>:huesped.map(t=>(
@@ -684,7 +683,6 @@ export default function App() {
                   </div>
                 ))}
               </div>
-              {/* En curso */}
               <div style={S.section}>
                 <p style={{margin:"0 0 0.75rem",fontWeight:600,fontSize:15,color:"#185FA5"}}>▶ En curso</p>
                 {enCurso.length===0?<p style={{color:"#888",fontSize:14}}>Nada en ejecución.</p>:enCurso.map(t=>(
@@ -694,7 +692,6 @@ export default function App() {
                   </div>
                 ))}
               </div>
-              {/* Pendientes con tareas migradas destacadas */}
               <div style={S.section}>
                 <p style={{margin:"0 0 0.75rem",fontWeight:600,fontSize:15}}>📅 Próximos 7 días</p>
                 {(()=>{
@@ -706,7 +703,7 @@ export default function App() {
                     <div key={t.id} style={{padding:"8px 10px",background:t.origen==="reporte"?"#FFF3E0":"#fff",borderRadius:8,marginBottom:6,borderLeft:`4px solid ${t.origen==="reporte"?"#FFB74D":urgStyle(t.urgencia).border}`}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                         <p style={{margin:0,fontWeight:500,fontSize:14}}>{t.titulo}</p>
-                        {t.origen==="reporte"&&<span style={{fontSize:10,color:"#E65100",fontWeight:600}}>🔗 Reporte</span>}
+                        {t.origen==="reporte"&&<span style={{fontSize:10,color:"#E65100",fontWeight:600}}>🔗</span>}
                       </div>
                       <p style={{margin:0,fontSize:12,color:"#888"}}>🏢 {t.edificio} · {FMT_DATE(t.fecha)}</p>
                     </div>
@@ -714,10 +711,10 @@ export default function App() {
                 })()}
               </div>
 
-              {/* Panel reportes migrados — SOLO en dashboard en pendientes */}
+              {/* Panel reportes migrados SOLO en dashboard */}
               {desdeLimpieza.length>0&&(
                 <div style={{...S.section,gridColumn:"1/-1",border:"1.5px solid #FFB74D",background:"#FFFBF5"}}>
-                  <p style={{margin:"0 0 0.75rem",fontWeight:600,fontSize:15,color:"#E65100"}}>🔗 Tareas migradas de reportes ({desdeLimpieza.length})</p>
+                  <p style={{margin:"0 0 0.75rem",fontWeight:600,fontSize:15,color:"#E65100"}}>🔗 Pendientes migrados de reportes ({desdeLimpieza.length})</p>
                   {desdeLimpieza.map(t=>(
                     <div key={t.id} style={{padding:"8px 10px",background:"#fff",borderRadius:8,marginBottom:6,borderLeft:"4px solid #FFB74D",display:"flex",gap:12,alignItems:"flex-start"}}>
                       <div style={{flex:1}}>
@@ -760,7 +757,7 @@ export default function App() {
               </div>
             </div>
             {tareasF.length===0?<p style={{textAlign:"center",color:"#888",marginTop:"2rem",fontSize:15}}>No hay tareas con esos filtros.</p>
-              :tareasF.map(t=><TareaCard key={t.id} t={t} onEdit={tt=>{setEditando(tt);setShowForm(true);}} onEstado={cambiarEstado} onDelete={eliminarTarea}/>)}
+              :tareasF.map(t=><TareaCard key={t.id} t={t} onEdit={tt=>{setEditando(tt);setShowForm(true);}} onEstado={cambiarEstado} onDelete={eliminarTarea} onComentario={guardarComentario}/>)}
           </div>
         )}
 
@@ -839,7 +836,7 @@ export default function App() {
           </div>
         )}
 
-        {/* EDIFICIOS */}
+        {/* EDIFICIOS — click en depto abre popup historial */}
         {tab==="edificios"&&(
           <div>
             {Object.keys(edificios).map(ed=>(
@@ -858,7 +855,7 @@ export default function App() {
                           border:`1.5px solid ${alerta?"#F5C4B3":urg?"#F09595":desdeRep?"#FFB74D":"#dddbd3"}`,
                           borderRadius:10,padding:"0.75rem",textAlign:"center",cursor:"pointer",
                           transition:"transform 0.15s,box-shadow 0.15s"}}
-                        onMouseEnter={e=>{e.currentTarget.style.transform="scale(1.03)";e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,0.10)";}}
+                        onMouseEnter={e=>{e.currentTarget.style.transform="scale(1.04)";e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,0.12)";}}
                         onMouseLeave={e=>{e.currentTarget.style.transform="scale(1)";e.currentTarget.style.boxShadow="none";}}>
                         <p style={{margin:"0 0 4px",fontWeight:600,fontSize:15}}>{d}</p>
                         {alerta&&<p style={{margin:"0 0 2px",fontSize:11,color:"#993C1D"}}>⚠ Huésped</p>}
@@ -866,7 +863,8 @@ export default function App() {
                         {ts.length>0
                           ?<span style={S.tag(urg?"#FCEBEB":"#E6F1FB",urg?"#A32D2D":"#185FA5",urg?"#F09595":"#85B7EB")}>{ts.length} activa{ts.length>1?"s":""}</span>
                           :<span style={{fontSize:12,color:"#aaa"}}>Libre</span>}
-                        {histCount>0&&<p style={{margin:"4px 0 0",fontSize:11,color:"#aaa"}}>📋 {histCount} en historial</p>}
+                        {histCount>0&&<p style={{margin:"4px 0 0",fontSize:11,color:"#aaa"}}>📋 {histCount} completada{histCount>1?"s":""}</p>}
+                        <p style={{margin:"4px 0 0",fontSize:11,color:"#185FA5",fontWeight:500}}>Ver historial →</p>
                       </div>
                     );
                   })}
@@ -881,7 +879,7 @@ export default function App() {
           <div>
             <p style={{fontWeight:500,fontSize:16,marginBottom:"1rem"}}>Historial de tareas completadas ({tareasComp.length})</p>
             {tareasComp.length===0?<p style={{textAlign:"center",color:"#888",fontSize:15,marginTop:"2rem"}}>Aún no hay tareas completadas.</p>
-              :tareasComp.map(t=><TareaCard key={t.id} t={t} onEdit={tt=>{setEditando(tt);setShowForm(true);}} onEstado={cambiarEstado} onDelete={eliminarTarea}/>)}
+              :tareasComp.map(t=><TareaCard key={t.id} t={t} onEdit={tt=>{setEditando(tt);setShowForm(true);}} onEstado={cambiarEstado} onDelete={eliminarTarea} onComentario={guardarComentario}/>)}
           </div>
         )}
 
@@ -979,13 +977,13 @@ export default function App() {
               <div style={{borderTop:"1px solid #ebe9e2",paddingTop:"1rem"}}>
                 <p style={{margin:"0 0 0.75rem",fontWeight:500,fontSize:14}}>🔗 Estado de integraciones</p>
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                  <div style={{background:"#EAF3DE",border:"1px solid #97C459",borderRadius:8,padding:"8px 12px",fontSize:13,color:"#3B6D11"}}>✅ Firebase Basecamp Alma conectado</div>
+                  <div style={{background:"#EAF3DE",border:"1px solid #97C459",borderRadius:8,padding:"8px 12px",fontSize:13,color:"#3B6D11"}}>✅ Firebase AlmaDesk conectado</div>
                   <div style={{background:"#EAF3DE",border:"1px solid #97C459",borderRadius:8,padding:"8px 12px",fontSize:13,color:"#3B6D11"}}>✅ App de Limpieza (solo lectura) conectada</div>
                   <div style={{background:"#E6F1FB",border:"1px solid #85B7EB",borderRadius:8,padding:"8px 12px",fontSize:13,color:"#185FA5"}}>🔄 Polling de reportes: cada 60 segundos</div>
                   <div style={{background:"#FFF3E0",border:"1px solid #FFB74D",borderRadius:8,padding:"8px 12px",fontSize:13,color:"#E65100",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                     <span>🔗 Reportes procesados: {procesadosIds.size}</span>
                     <button onClick={async()=>{
-                      if(!window.confirm("¿Reprocesar todos los reportes?")) return;
+                      if(!window.confirm("¿Reprocesar todos los reportes? Solo se crearán tareas de los que aún no existan.")) return;
                       procesadosRef.current=new Set();
                       setProcesadosIds(new Set());
                       await almaSet("alma_procesados",[]);
