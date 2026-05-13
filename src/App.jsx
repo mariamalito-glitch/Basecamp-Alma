@@ -1035,11 +1035,63 @@ export default function App() {
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem"}}>
             <div style={S.section}>
               <p style={{margin:"0 0 1rem",fontWeight:500,fontSize:15}}>🏢 Edificios y departamentos</p>
+
+              {/* Importar CSV */}
+              <div style={{background:"#E6F1FB",border:"1px solid #85B7EB",borderRadius:10,padding:"0.75rem 1rem",marginBottom:"1rem"}}>
+                <p style={{margin:"0 0 6px",fontSize:13,fontWeight:600,color:"#185FA5"}}>📂 Importar desde CSV</p>
+                <p style={{margin:"0 0 8px",fontSize:12,color:"#555"}}>
+                  El CSV debe tener columnas: <b>Edificio</b> y <b>Departamento</b><br/>
+                  Ejemplo: <code style={{background:"#fff",padding:"1px 5px",borderRadius:4}}>H475, 101</code>
+                </p>
+                <input type="file" accept=".csv" onChange={async e => {
+                  const file = e.target.files[0];
+                  if(!file) return;
+                  const text = await file.text();
+                  const lines = text.trim().split(/\r?\n/);
+                  if(lines.length < 2) { showToast("CSV vacío o sin datos","err"); return; }
+
+                  // Detectar delimitador
+                  const delim = lines[0].includes(";") ? ";" : ",";
+                  const headers = lines[0].split(delim).map(h=>h.trim().toLowerCase().replace(/"/g,""));
+
+                  // Buscar columnas de edificio y depto
+                  const iEd = headers.findIndex(h=>h.includes("edif")||h.includes("build")||h==="ed");
+                  const iDep = headers.findIndex(h=>h.includes("dep")||h.includes("apt")||h.includes("unidad")||h.includes("unit")||h.includes("hab"));
+
+                  if(iEd===-1||iDep===-1) {
+                    showToast("No encontré columnas Edificio y Departamento","err");
+                    e.target.value=""; return;
+                  }
+
+                  // Procesar filas
+                  const upd = JSON.parse(JSON.stringify(edificios));
+                  let nuevos=0, duplicados=0;
+                  lines.slice(1).forEach(line => {
+                    if(!line.trim()) return;
+                    const cols = line.split(delim).map(c=>c.trim().replace(/"/g,""));
+                    const ed = cols[iEd]?.trim().toUpperCase();
+                    const dep = cols[iDep]?.trim();
+                    if(!ed||!dep) return;
+                    if(!upd[ed]) upd[ed]=[];
+                    if(upd[ed].includes(dep)) { duplicados++; return; }
+                    upd[ed].push(dep);
+                    nuevos++;
+                  });
+
+                  await saveEdificios(upd);
+                  showToast(`✅ ${nuevos} deptos importados${duplicados>0?`, ${duplicados} duplicados omitidos`:""}`);
+                  e.target.value="";
+                }} style={{...S.input,padding:"6px",fontSize:13,cursor:"pointer"}}/>
+              </div>
+
+              {/* Agregar manual */}
               <div style={{display:"flex",gap:"0.5rem",marginBottom:"0.75rem"}}>
                 <input style={{...S.input,flex:1}} placeholder="Nuevo edificio" value={newEdificio} onChange={e=>setNewEdificio(e.target.value)}/>
                 <button onClick={async()=>{
                   if(!newEdificio.trim()) return;
-                  const upd={...edificios,[newEdificio.trim().toUpperCase()]:[]};
+                  const key = newEdificio.trim().toUpperCase();
+                  if(edificios[key]) { showToast("Ese edificio ya existe","err"); return; }
+                  const upd={...edificios,[key]:[]};
                   await saveEdificios(upd); setNewEdificio("");
                 }} style={S.btn("#185FA5","#fff")}>+ Edificio</button>
               </div>
@@ -1050,13 +1102,25 @@ export default function App() {
                 <input style={{...S.input,flex:2}} placeholder="Número o nombre del dpto" value={newDepto.nombre} onChange={e=>setNewDepto(p=>({...p,nombre:e.target.value}))}/>
                 <button onClick={async()=>{
                   if(!newDepto.nombre.trim()) return;
-                  const upd={...edificios,[newDepto.ed]:[...(edificios[newDepto.ed]||[]),newDepto.nombre.trim()]};
+                  const dep = newDepto.nombre.trim();
+                  if((edificios[newDepto.ed]||[]).includes(dep)) { showToast("Ese dpto ya existe","err"); return; }
+                  const upd={...edificios,[newDepto.ed]:[...(edificios[newDepto.ed]||[]),dep]};
                   await saveEdificios(upd); setNewDepto(p=>({...p,nombre:""}));
                 }} style={S.btn("#3B6D11","#fff")}>+ Dpto</button>
               </div>
+
+              {/* Listado actual */}
               {Object.entries(edificios).map(([ed,ds])=>(
                 <div key={ed} style={{marginBottom:"0.75rem"}}>
-                  <p style={{margin:"0 0 4px",fontWeight:500,fontSize:13,color:"#888"}}>{ed} ({ds.length} dptos)</p>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                    <p style={{margin:0,fontWeight:600,fontSize:13,color:"#444"}}>{ed} <span style={{color:"#888",fontWeight:400}}>({ds.length} deptos)</span></p>
+                    <button onClick={async()=>{
+                      if(!window.confirm(`¿Eliminar edificio ${ed} y todos sus deptos?`)) return;
+                      const upd={...edificios};
+                      delete upd[ed];
+                      await saveEdificios(upd);
+                    }} style={{...S.btn("#FCEBEB","#A32D2D"),padding:"3px 8px",fontSize:11,border:"1px solid #F09595"}}>🗑️ Eliminar edificio</button>
+                  </div>
                   <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
                     {ds.map(d=>(
                       <span key={d} style={{...S.tag("#F1EFE8","#444","#B4B2A9"),display:"flex",alignItems:"center",gap:4}}>
