@@ -102,54 +102,85 @@ async function limpiezaGet(k) {
   return snap.exists() ? JSON.parse(snap.data().value) : null;
 }
 
-// ── Clasificador con Claude API ───────────────────────────────────────────────
-async function clasificarReporte(texto, edificio, depto) {
-  try {
-    const prompt = `Sos el sistema de gestión de Alma Rentals, empresa de alquileres temporarios.
-Clasificá este reporte de una propiedad y respondé SOLO con JSON válido, sin texto extra.
+// ── Clasificador por reglas (sin API key) ────────────────────────────────────
+function clasificarReporte(texto) {
+  const t = texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
 
-Reporte: "${texto}"
-Edificio: ${edificio || "desconocido"}
-Depto: ${depto || "desconocido"}
-
-Reglas de clasificación:
-- MANTENIMIENTO: roturas físicas, fallas eléctricas, problemas de plomería/gas, cerrajería, carpintería, algo que no funciona o está roto. Ejemplos: "caja fuerte cerrada", "canilla rota", "no anda la luz", "estante caído", "pérdida de agua".
-- REPOSICION: falta de insumos, vajilla, amenities, ropa de cama. Ejemplos: "faltan vasos", "no hay papel higiénico", "falta toalla".
-- LIMPIEZA: suciedad, manchas, mal olor. Ejemplos: "baño sucio", "mancha en alfombra".
-- HUESPED: olvidos de huéspedes, consultas, quejas personales. Ejemplos: "olvidó ropa", "olvido".
-- OTRO: cualquier otra cosa.
-
-Si es MANTENIMIENTO, además inferí:
-- tipo: una de [Eléctrica, Sanitaria, Pintura, Obra mayor, Albañilería, Herrería, Gas, Limpieza, Cerrajería, General]
-- urgencia: Urgente (sin agua/luz/gas o peligro), Media (funciona mal), Baja (estético o menor)
-- titulo: título corto descriptivo (max 60 chars)
-
-Respondé con este JSON exacto:
-{
-  "categoria": "MANTENIMIENTO" | "REPOSICION" | "LIMPIEZA" | "HUESPED" | "OTRO",
-  "esMantenimiento": true | false,
-  "tipo": "...",
-  "urgencia": "Urgente" | "Media" | "Baja",
-  "titulo": "..."
-}`;
-
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 300,
-        messages: [{ role: "user", content: prompt }]
-      })
-    });
-    const data = await res.json();
-    const text = data.content?.map(c => c.text||"").join("") || "";
-    const clean = text.replace(/```json|```/g,"").trim();
-    return JSON.parse(clean);
-  } catch(e) {
-    console.error("Clasificación falló:", e);
-    return { esMantenimiento: false, categoria: "OTRO" };
+  // Palabras que NO son mantenimiento
+  const noMante = ["olvido","olvidó","olvide","perdido","perdida","objeto","ropa","vajilla",
+    "vaso","vasos","taza","plato","cubierto","falta reponer","reponer","amenities",
+    "toalla falta","sabana","papel higienico","shampoo","jabon","sucio","sucia",
+    "limpieza","mancha","olor","basura","mugre"];
+  for(const p of noMante) {
+    if(t.includes(p)) return { esMantenimiento:false, categoria:"OTRO" };
   }
+
+  // Eléctrica
+  const electrica = ["luz","electricidad","electrico","electrica","disyuntor","tomacorriente",
+    "enchufe","lampara","foco","cortocircuito","tablero","no anda la luz","no hay luz",
+    "sin luz","calefactor electrico","aire acondicionado","no enfria","no calienta"];
+  for(const p of electrica) {
+    if(t.includes(p)) return { esMantenimiento:true, tipo:"Eléctrica",
+      urgencia: t.includes("sin luz")||t.includes("no hay luz")?"Urgente":"Media",
+      titulo: capitalizar(texto.slice(0,60)) };
+  }
+
+  // Sanitaria
+  const sanitaria = ["agua","canilla","canio","cano","pileta","inodoro","bano","ducha",
+    "perdida de agua","gotea","no sale agua","sin agua","presion","desague","caño",
+    "humedad","perdida","inundacion","calefon","termotanque"];
+  for(const p of sanitaria) {
+    if(t.includes(p)) return { esMantenimiento:true, tipo:"Sanitaria",
+      urgencia: t.includes("sin agua")||t.includes("no sale agua")||t.includes("inundacion")?"Urgente":"Media",
+      titulo: capitalizar(texto.slice(0,60)) };
+  }
+
+  // Gas
+  const gas = ["gas","garrafa","hornalla","cocina no anda","olor a gas","escape de gas"];
+  for(const p of gas) {
+    if(t.includes(p)) return { esMantenimiento:true, tipo:"Gas",
+      urgencia: t.includes("olor a gas")||t.includes("escape")?"Urgente":"Media",
+      titulo: capitalizar(texto.slice(0,60)) };
+  }
+
+  // Cerrajería
+  const cerrajeria = ["cerradura","llave","llavín","no abre","no cierra","traba","cerrojo",
+    "caja fuerte","puerta trabada","puerta no abre","candado","pomo"];
+  for(const p of cerrajeria) {
+    if(t.includes(p)) return { esMantenimiento:true, tipo:"Cerrajería",
+      urgencia:"Media", titulo: capitalizar(texto.slice(0,60)) };
+  }
+
+  // Carpintería / Albañilería
+  const albanileria = ["caido","roto","rajado","rajadura","grieta","pared","techo","piso",
+    "baldosa","azulejo","estante","mueble","madera","bisagra","ventana rota","vidrio roto",
+    "persiana","cortina caida","espejo roto"];
+  for(const p of albanileria) {
+    if(t.includes(p)) return { esMantenimiento:true, tipo:"Albañilería",
+      urgencia:"Baja", titulo: capitalizar(texto.slice(0,60)) };
+  }
+
+  // Herrería
+  const herreria = ["reja","baranda","escalera rota","barandal","metal","oxidado","oxido"];
+  for(const p of herreria) {
+    if(t.includes(p)) return { esMantenimiento:true, tipo:"Herrería",
+      urgencia:"Baja", titulo: capitalizar(texto.slice(0,60)) };
+  }
+
+  // General — si menciona que algo no funciona
+  const general = ["no funciona","no anda","roto","rota","no sirve","daño","dañado",
+    "falla","fallando","problema con","desprendido","desprendida","caída","caido"];
+  for(const p of general) {
+    if(t.includes(p)) return { esMantenimiento:true, tipo:"General",
+      urgencia:"Media", titulo: capitalizar(texto.slice(0,60)) };
+  }
+
+  return { esMantenimiento:false, categoria:"OTRO" };
+}
+
+function capitalizar(str) {
+  if(!str) return str;
+  return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
@@ -564,8 +595,8 @@ export default function App() {
           depto = dText;
         }
 
-        // Clasificar con Claude
-        const resultado = await clasificarReporte(rep.comentario, edificio, depto);
+        // Clasificar con reglas
+        const resultado = clasificarReporte(rep.comentario);
 
         // Marcar como procesado
         procesadosRef.current.add(String(rep.id));
@@ -1164,8 +1195,18 @@ export default function App() {
                   <div style={{background:"#E6F1FB",border:"1px solid #85B7EB",borderRadius:8,padding:"8px 12px",fontSize:13,color:"#185FA5"}}>
                     🔄 Polling de reportes: cada 60 segundos
                   </div>
-                  <div style={{background:"#FFF3E0",border:"1px solid #FFB74D",borderRadius:8,padding:"8px 12px",fontSize:13,color:"#E65100"}}>
-                    🔗 Reportes procesados: {procesadosIds.size}
+                  <div style={{background:"#FFF3E0",border:"1px solid #FFB74D",borderRadius:8,padding:"8px 12px",fontSize:13,color:"#E65100",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span>🔗 Reportes procesados: {procesadosIds.size}</span>
+                    <button onClick={async()=>{
+                      if(!window.confirm("¿Resetear reportes procesados? Esto va a volver a clasificar todos los reportes de la app de limpieza.")) return;
+                      procesadosRef.current = new Set();
+                      setProcesadosIds(new Set());
+                      await almaSet("alma_procesados", []);
+                      showToast("✅ Reseteo listo, esperá 60 segundos o recargá");
+                      setTimeout(checkReportesLimpieza, 2000);
+                    }} style={{...S.btn("#E65100","#fff"),fontSize:11,padding:"4px 10px"}}>
+                      🔄 Reprocesar
+                    </button>
                   </div>
                 </div>
               </div>
