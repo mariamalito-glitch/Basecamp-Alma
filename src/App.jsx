@@ -109,7 +109,7 @@ function resizePhoto(file,cb){
 // ── Semana ────────────────────────────────────────────────────────────────────
 function getWeekDays(baseDate,offset){
   const d=new Date(baseDate+"T12:00:00");
-  const dow=d.getDay(); // 0=Dom
+  const dow=d.getDay();
   const lunes=new Date(d); lunes.setDate(d.getDate()-(dow===0?6:dow-1)+(offset*7));
   return Array.from({length:7},(_,i)=>{
     const x=new Date(lunes); x.setDate(lunes.getDate()+i);
@@ -334,7 +334,6 @@ function TareaForm({tarea,edificios,tipos,onSave,onClose}){
         <div><label style={S.label}>💬 Comentario interno</label>
           <textarea style={{...S.input,resize:"vertical"}} rows={2} value={f.comentario||""} onChange={e=>set("comentario",e.target.value)} placeholder="Notas internas..."/>
         </div>
-        {/* Foto */}
         <div>
           <label style={S.label}>📷 Foto de referencia</label>
           <input type="file" accept="image/*" capture="environment" onChange={handleFoto} style={{...S.input,padding:"6px",cursor:"pointer"}}/>
@@ -363,19 +362,114 @@ function TareaForm({tarea,edificios,tipos,onSave,onClose}){
   );
 }
 
-// ── Vista Semanal (organización de trabajo) ───────────────────────────────────
-function VistaSemanal({tareas,onMoverTarea}){
+// ── Vista Semanal ─────────────────────────────────────────────────────────────
+// CAMBIO: tarjetas con botón editar + volver a pendiente, y separación Obra vs resto
+function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
   const [weekOff,setWeekOff]=useState(0);
   const [arrastrando,setArrastrando]=useState(null);
   const weekDays=getWeekDays(TODAY,weekOff);
   const labelSem=`${FMT_DATE(weekDays[0])} — ${FMT_DATE(weekDays[6])}`;
 
-  const tareasDelDia=iso=>tareas.filter(t=>t.fechaTrabajo===iso||(t.fechaTrabajo===undefined&&t.fecha===iso));
-  const sinAsignar=tareas.filter(t=>t.estado!=="Completada"&&!t.fechaTrabajo&&t.fecha!==weekDays.find(d=>d===t.fecha));
-
   function onDragStart(e,tarea){setArrastrando(tarea);e.dataTransfer.effectAllowed="move";}
   function onDrop(e,iso){e.preventDefault();if(!arrastrando) return;onMoverTarea(arrastrando.id,iso);setArrastrando(null);}
   function onDragOver(e){e.preventDefault();e.dataTransfer.dropEffect="move";}
+
+  // Tarjeta compacta con editar + quitar día
+  function MiniCard({t,isDraggable=true}){
+    const urg=urgStyle(t.urgencia);
+    const esObra=t.asignado==="Obra";
+    return(
+      <div
+        draggable={isDraggable}
+        onDragStart={isDraggable?e=>onDragStart(e,t):undefined}
+        style={{
+          background: esObra ? "#2D1B69" : urg.bg,
+          border:`1.5px solid ${esObra?"#7C5CBF":urg.border}`,
+          borderRadius:8,
+          padding:"5px 7px",
+          marginBottom:4,
+          cursor:isDraggable?"grab":"default",
+          fontSize:11,
+        }}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:4}}>
+          <div style={{flex:1,minWidth:0}}>
+            <p style={{margin:"0 0 1px",fontWeight:600,color:esObra?"#C9B8FF":urg.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.titulo}</p>
+            <p style={{margin:0,color:esObra?"#A084E8":urg.text,opacity:0.85,fontSize:10}}>{t.edificio} · {t.depto}</p>
+            {t.fechaTrabajo&&t.fechaTrabajo!==t.fecha&&(
+              <p style={{margin:"1px 0 0",fontSize:10,color:esObra?"#9B7DD4":"#888"}}>orig: {FMT_DATE(t.fecha)}</p>
+            )}
+          </div>
+          <div style={{display:"flex",gap:2,flexShrink:0,marginLeft:2}}>
+            <button
+              title="Editar"
+              onClick={e=>{e.stopPropagation();onEdit(t);}}
+              style={{background:"rgba(255,255,255,0.25)",border:"none",borderRadius:5,width:20,height:20,fontSize:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:esObra?"#C9B8FF":"#555"}}>
+              ✏️
+            </button>
+            {t.fechaTrabajo&&(
+              <button
+                title="Volver a pendiente (quitar día asignado)"
+                onClick={e=>{e.stopPropagation();onQuitarDia(t.id);}}
+                style={{background:"rgba(255,255,255,0.25)",border:"none",borderRadius:5,width:20,height:20,fontSize:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:esObra?"#C9B8FF":"#555"}}>
+                ↩
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Separar tareas por grupo dentro de un día
+  function DiaColumn({iso}){
+    const esHoy=iso===TODAY;
+    const tsAsig=tareas.filter(t=>t.estado!=="Completada"&&t.fechaTrabajo===iso);
+    const tsOrig=tareas.filter(t=>t.estado!=="Completada"&&!t.fechaTrabajo&&t.fecha===iso);
+    const todas=[...tsAsig,...tsOrig];
+    const obra=todas.filter(t=>t.asignado==="Obra");
+    const resto=todas.filter(t=>t.asignado!=="Obra");
+    return(
+      <div
+        onDragOver={onDragOver}
+        onDrop={e=>onDrop(e,iso)}
+        style={{
+          minHeight:180,
+          background:esHoy?"#E6F1FB":"#f7f6f2",
+          border:`2px ${esHoy?"solid #185FA5":"dashed #dddbd3"}`,
+          borderRadius:12,
+          padding:"0.5rem",
+          transition:"background 0.15s",
+        }}>
+        <p style={{margin:"0 0 6px",fontSize:12,fontWeight:700,color:esHoy?"#185FA5":"#888",textAlign:"center"}}>
+          {DIAS_CORTO[new Date(iso+"T12:00:00").getDay()]}<br/>
+          <span style={{fontSize:11,fontWeight:400}}>{FMT_DATE(iso)}</span>
+        </p>
+
+        {/* Bloque Yo + Mantenimiento */}
+        {resto.length>0&&(
+          <div style={{marginBottom:6}}>
+            <p style={{margin:"0 0 3px",fontSize:9,fontWeight:700,color:"#185FA5",textTransform:"uppercase",letterSpacing:"0.05em",borderBottom:"1px solid #c5d9ef",paddingBottom:2}}>🔧 Mantenimiento</p>
+            {resto.map(t=><MiniCard key={t.id} t={t}/>)}
+          </div>
+        )}
+
+        {/* Bloque Obra */}
+        {obra.length>0&&(
+          <div>
+            <p style={{margin:"0 0 3px",fontSize:9,fontWeight:700,color:"#9B7DD4",textTransform:"uppercase",letterSpacing:"0.05em",borderBottom:"1px solid #7C5CBF",paddingBottom:2}}>🏗️ Obra</p>
+            {obra.map(t=><MiniCard key={t.id} t={t}/>)}
+          </div>
+        )}
+
+        {todas.length===0&&<p style={{fontSize:11,color:"#bbb",textAlign:"center",marginTop:8}}>Sin tareas</p>}
+      </div>
+    );
+  }
+
+  // Pendientes sin día: también separadas
+  const sinDia=tareas.filter(t=>t.estado!=="Completada"&&!t.fechaTrabajo&&!weekDays.includes(t.fecha));
+  const sinDiaResto=sinDia.filter(t=>t.asignado!=="Obra");
+  const sinDiaObra=sinDia.filter(t=>t.asignado==="Obra");
 
   return(
     <div>
@@ -388,62 +482,76 @@ function VistaSemanal({tareas,onMoverTarea}){
       </div>
 
       <div style={{background:"#fff8e1",border:"1px solid #FFE082",borderRadius:12,padding:"0.75rem 1rem",marginBottom:"1rem",fontSize:13,color:"#795548"}}>
-        💡 Arrastrá las tareas hacia el día en que querés trabajarlas. Esto es solo organización, no cambia las fechas originales.
+        💡 Arrastrá las tareas hacia el día en que querés trabajarlas. Usá ✏️ para editar y ↩ para volver a pendiente sin día.
+      </div>
+
+      {/* Leyenda */}
+      <div style={{display:"flex",gap:12,marginBottom:"0.75rem",flexWrap:"wrap"}}>
+        <span style={{display:"flex",alignItems:"center",gap:5,fontSize:12,color:"#185FA5",fontWeight:500}}>
+          <span style={{width:12,height:12,borderRadius:3,background:"#E6F1FB",border:"1.5px solid #85B7EB",display:"inline-block"}}/>
+          🔧 Mantenimiento (Yo / Alma Rentals)
+        </span>
+        <span style={{display:"flex",alignItems:"center",gap:5,fontSize:12,color:"#9B7DD4",fontWeight:500}}>
+          <span style={{width:12,height:12,borderRadius:3,background:"#2D1B69",border:"1.5px solid #7C5CBF",display:"inline-block"}}/>
+          🏗️ Obra
+        </span>
       </div>
 
       {/* Grid semanal */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:6}}>
-        {weekDays.map((iso,i)=>{
-          const esHoy=iso===TODAY;
-          const ts=tareas.filter(t=>t.estado!=="Completada"&&(t.fechaTrabajo===iso));
-          const tsOrig=tareas.filter(t=>t.estado!=="Completada"&&!t.fechaTrabajo&&t.fecha===iso);
-          const todas=[...ts,...tsOrig];
-          return(
-            <div key={iso}
-              onDragOver={onDragOver}
-              onDrop={e=>onDrop(e,iso)}
-              style={{minHeight:180,background:esHoy?"#E6F1FB":"#f7f6f2",border:`2px ${esHoy?"solid #185FA5":"dashed #dddbd3"}`,borderRadius:12,padding:"0.5rem",transition:"background 0.15s"}}>
-              <p style={{margin:"0 0 6px",fontSize:12,fontWeight:700,color:esHoy?"#185FA5":"#888",textAlign:"center"}}>
-                {DIAS_CORTO[new Date(iso+"T12:00:00").getDay()]}<br/>
-                <span style={{fontSize:11,fontWeight:400}}>{FMT_DATE(iso)}</span>
-              </p>
-              {todas.map(t=>{
+        {weekDays.map(iso=><DiaColumn key={iso} iso={iso}/>)}
+      </div>
+
+      {/* Pendientes sin día */}
+      <div style={{marginTop:"1.25rem"}}>
+        <p style={{margin:"0 0 0.75rem",fontWeight:500,fontSize:14,color:"#888"}}>📋 Pendientes sin día asignado esta semana</p>
+
+        {sinDiaResto.length>0&&(
+          <div style={{marginBottom:"0.75rem"}}>
+            <p style={{margin:"0 0 0.5rem",fontSize:12,fontWeight:600,color:"#185FA5"}}>🔧 Mantenimiento</p>
+            <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+              {sinDiaResto.map(t=>{
                 const urg=urgStyle(t.urgencia);
                 return(
-                  <div key={t.id} draggable
-                    onDragStart={e=>onDragStart(e,t)}
-                    style={{background:urg.bg,border:`1px solid ${urg.border}`,borderRadius:8,padding:"5px 7px",marginBottom:4,cursor:"grab",fontSize:11}}>
-                    <p style={{margin:"0 0 2px",fontWeight:600,color:urg.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.titulo}</p>
-                    <p style={{margin:0,color:urg.text,opacity:0.8}}>{t.edificio} · {t.depto}</p>
-                    {t.fechaTrabajo&&t.fechaTrabajo!==t.fecha&&(
-                      <p style={{margin:"2px 0 0",fontSize:10,color:"#888"}}>orig: {FMT_DATE(t.fecha)}</p>
-                    )}
+                  <div key={t.id} draggable onDragStart={e=>onDragStart(e,t)}
+                    style={{background:urg.bg,border:`1px solid ${urg.border}`,borderRadius:8,padding:"6px 10px",cursor:"grab",fontSize:12,maxWidth:200,position:"relative"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:4}}>
+                      <div>
+                        <p style={{margin:"0 0 2px",fontWeight:600,color:urg.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:150}}>{t.titulo}</p>
+                        <p style={{margin:0,color:urg.text,opacity:0.8,fontSize:11}}>{t.edificio} · {t.depto} | {t.asignado}</p>
+                      </div>
+                      <button title="Editar" onClick={e=>{e.stopPropagation();onEdit(t);}}
+                        style={{background:"rgba(0,0,0,0.08)",border:"none",borderRadius:4,width:18,height:18,fontSize:9,cursor:"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>✏️</button>
+                    </div>
                   </div>
                 );
               })}
-              {todas.length===0&&<p style={{fontSize:11,color:"#bbb",textAlign:"center",marginTop:8}}>Sin tareas</p>}
             </div>
-          );
-        })}
-      </div>
+          </div>
+        )}
 
-      {/* Tareas sin día asignado esta semana */}
-      <div style={{marginTop:"1.25rem"}}>
-        <p style={{margin:"0 0 0.75rem",fontWeight:500,fontSize:14,color:"#888"}}>📋 Pendientes sin día asignado esta semana</p>
-        <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-          {tareas.filter(t=>t.estado!=="Completada"&&!t.fechaTrabajo&&!weekDays.includes(t.fecha)).map(t=>{
-            const urg=urgStyle(t.urgencia);
-            return(
-              <div key={t.id} draggable onDragStart={e=>onDragStart(e,t)}
-                style={{background:urg.bg,border:`1px solid ${urg.border}`,borderRadius:8,padding:"6px 10px",cursor:"grab",fontSize:12,maxWidth:200}}>
-                <p style={{margin:"0 0 2px",fontWeight:600,color:urg.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.titulo}</p>
-                <p style={{margin:0,color:urg.text,opacity:0.8,fontSize:11}}>{t.edificio} · {t.depto} | {t.asignado}</p>
-              </div>
-            );
-          })}
-          {tareas.filter(t=>t.estado!=="Completada"&&!t.fechaTrabajo&&!weekDays.includes(t.fecha)).length===0&&
-            <p style={{fontSize:13,color:"#aaa"}}>Todas las tareas tienen día asignado 👍</p>}
-        </div>
+        {sinDiaObra.length>0&&(
+          <div>
+            <p style={{margin:"0 0 0.5rem",fontSize:12,fontWeight:600,color:"#9B7DD4"}}>🏗️ Obra</p>
+            <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+              {sinDiaObra.map(t=>(
+                <div key={t.id} draggable onDragStart={e=>onDragStart(e,t)}
+                  style={{background:"#2D1B69",border:"1px solid #7C5CBF",borderRadius:8,padding:"6px 10px",cursor:"grab",fontSize:12,maxWidth:200}}>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:4}}>
+                    <div>
+                      <p style={{margin:"0 0 2px",fontWeight:600,color:"#C9B8FF",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:150}}>{t.titulo}</p>
+                      <p style={{margin:0,color:"#A084E8",fontSize:11}}>{t.edificio} · {t.depto}</p>
+                    </div>
+                    <button title="Editar" onClick={e=>{e.stopPropagation();onEdit(t);}}
+                      style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:4,width:18,height:18,fontSize:9,cursor:"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",color:"#C9B8FF"}}>✏️</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {sinDia.length===0&&<p style={{fontSize:13,color:"#aaa"}}>Todas las tareas tienen día asignado 👍</p>}
       </div>
     </div>
   );
@@ -592,13 +700,19 @@ export default function App(){
     await saveTareas(tareas.map(t=>t.id===id?{...t,fechaTrabajo}:t));
   },[tareas,saveTareas]);
 
-  // Ordenar por fecha de carga desc (más nueva primero)
+  // CAMBIO: quitar día asignado (volver a pendiente en organización)
+  const quitarDiaTarea=useCallback(async id=>{
+    await saveTareas(tareas.map(t=>t.id===id?{...t,fechaTrabajo:undefined}:t));
+  },[tareas,saveTareas]);
+
+  // Ordenar por fechaCarga desc (más nueva primero)
   const sortDesc = arr => [...arr].sort((a,b)=>{
     const fa=a.fechaCarga||a.fecha||""; const fb=b.fechaCarga||b.fecha||"";
     return fb.localeCompare(fa);
   });
   const tareasActivas=sortDesc(tareas.filter(t=>t.estado!=="Completada"));
   const tareasComp=sortDesc(tareas.filter(t=>t.estado==="Completada"));
+  // CAMBIO: dashboard sections también sorted por fechaCarga desc
   const urgentes=sortDesc(tareasActivas.filter(t=>t.urgencia==="Urgente"));
   const enCurso=sortDesc(tareas.filter(t=>t.estado==="En curso"));
   const huesped=sortDesc(tareas.filter(t=>t.huespedAlerta&&t.estado!=="Completada"));
@@ -686,6 +800,7 @@ export default function App(){
                 </div>
               ))}
             </div>
+            {/* CAMBIO: todas las listas del dashboard usan sortDesc → más nueva primero */}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem"}}>
               <div style={S.section}>
                 <p style={{margin:"0 0 0.75rem",fontWeight:600,fontSize:15,color:"#A32D2D"}}>🔴 Urgentes activas</p>
@@ -693,6 +808,7 @@ export default function App(){
                   <div key={t.id} style={{padding:"8px 10px",background:"#fff",borderRadius:8,marginBottom:6,borderLeft:"4px solid #F09595"}}>
                     <p style={{margin:0,fontWeight:500,fontSize:14}}>{t.titulo}</p>
                     <p style={{margin:0,fontSize:12,color:"#888"}}>🏢 {t.edificio} · {t.depto} | 👤 {t.asignado}</p>
+                    <p style={{margin:"2px 0 0",fontSize:11,color:"#bbb"}}>Cargada: {FMT_DATE(t.fechaCarga||t.fecha)}</p>
                   </div>
                 ))}
               </div>
@@ -702,6 +818,7 @@ export default function App(){
                   <div key={t.id} style={{padding:"8px 10px",background:"#FAEEDA",borderRadius:8,marginBottom:6,borderLeft:"4px solid #EF9F27"}}>
                     <p style={{margin:0,fontWeight:500,fontSize:14}}>{t.titulo}</p>
                     <p style={{margin:0,fontSize:12,color:"#854F0B"}}>🏢 {t.edificio} · {t.depto}</p>
+                    <p style={{margin:"2px 0 0",fontSize:11,color:"#c08040"}}>Cargada: {FMT_DATE(t.fechaCarga||t.fecha)}</p>
                   </div>
                 ))}
               </div>
@@ -711,6 +828,7 @@ export default function App(){
                   <div key={t.id} style={{padding:"8px 10px",background:"#fff",borderRadius:8,marginBottom:6,borderLeft:"4px solid #85B7EB"}}>
                     <p style={{margin:0,fontWeight:500,fontSize:14}}>{t.titulo}</p>
                     <p style={{margin:0,fontSize:12,color:"#888"}}>👤 {t.asignado} · 📅 {FMT_DATE(t.fecha)}</p>
+                    <p style={{margin:"2px 0 0",fontSize:11,color:"#bbb"}}>Cargada: {FMT_DATE(t.fechaCarga||t.fecha)}</p>
                   </div>
                 ))}
               </div>
@@ -719,7 +837,7 @@ export default function App(){
                 {(()=>{
                   const fin=new Date();fin.setDate(fin.getDate()+7);
                   const finStr=fin.toISOString().slice(0,10);
-                  const ts=tareasActivas.filter(t=>t.fecha>=TODAY&&t.fecha<=finStr);
+                  const ts=sortDesc(tareasActivas.filter(t=>t.fecha>=TODAY&&t.fecha<=finStr));
                   if(!ts.length) return <p style={{color:"#888",fontSize:14}}>Sin tareas próximas.</p>;
                   return ts.map(t=>(
                     <div key={t.id} style={{padding:"8px 10px",background:t.origen==="reporte"?"#FFF3E0":"#fff",borderRadius:8,marginBottom:6,borderLeft:`4px solid ${t.origen==="reporte"?"#FFB74D":urgStyle(t.urgencia).border}`}}>
@@ -728,6 +846,7 @@ export default function App(){
                         {t.origen==="reporte"&&<span style={{fontSize:10,color:"#E65100"}}>🔗</span>}
                       </div>
                       <p style={{margin:0,fontSize:12,color:"#888"}}>🏢 {t.edificio} · {FMT_DATE(t.fecha)}</p>
+                      <p style={{margin:"2px 0 0",fontSize:11,color:"#bbb"}}>Cargada: {FMT_DATE(t.fechaCarga||t.fecha)}</p>
                     </div>
                   ));
                 })()}
@@ -743,6 +862,7 @@ export default function App(){
                           <span style={S.tag(urgStyle(t.urgencia).bg,urgStyle(t.urgencia).text,urgStyle(t.urgencia).border)}>{t.urgencia}</span>
                         </div>
                         <p style={{margin:"2px 0 0",fontSize:12,color:"#888"}}>🏢 {t.edificio} · {t.depto} | 🔧 {t.tipo} | 📅 {FMT_DATE(t.fecha)}</p>
+                        <p style={{margin:"2px 0 0",fontSize:11,color:"#bbb"}}>Cargada: {FMT_DATE(t.fechaCarga||t.fecha)}</p>
                       </div>
                       {(t.fotoReporte||t.foto)&&<img src={t.fotoReporte||t.foto} alt="foto" style={{width:56,height:56,objectFit:"cover",borderRadius:8,border:"1px solid #FFB74D",flexShrink:0,cursor:"zoom-in"}} onClick={()=>window.open(t.fotoReporte||t.foto,"_blank")}/>}
                     </div>
@@ -785,7 +905,13 @@ export default function App(){
         {/* ORGANIZACIÓN SEMANAL */}
         {tab==="semanal"&&(
           <div style={S.section}>
-            <VistaSemanal tareas={tareasActivas} onMoverTarea={moverTarea}/>
+            {/* CAMBIO: se pasan onEdit y onQuitarDia */}
+            <VistaSemanal
+              tareas={tareasActivas}
+              onMoverTarea={moverTarea}
+              onEdit={tt=>{setEditando(tt);setShowForm(true);}}
+              onQuitarDia={quitarDiaTarea}
+            />
           </div>
         )}
 
