@@ -592,12 +592,17 @@ export default function App(){
     await saveTareas(tareas.map(t=>t.id===id?{...t,fechaTrabajo}:t));
   },[tareas,saveTareas]);
 
-  const tareasActivas=tareas.filter(t=>t.estado!=="Completada");
-  const tareasComp=tareas.filter(t=>t.estado==="Completada");
-  const urgentes=tareasActivas.filter(t=>t.urgencia==="Urgente");
-  const enCurso=tareas.filter(t=>t.estado==="En curso");
-  const huesped=tareas.filter(t=>t.huespedAlerta&&t.estado!=="Completada");
-  const desdeLimpieza=tareas.filter(t=>t.origen==="reporte"&&t.estado!=="Completada");
+  // Ordenar por fecha de carga desc (más nueva primero)
+  const sortDesc = arr => [...arr].sort((a,b)=>{
+    const fa=a.fechaCarga||a.fecha||""; const fb=b.fechaCarga||b.fecha||"";
+    return fb.localeCompare(fa);
+  });
+  const tareasActivas=sortDesc(tareas.filter(t=>t.estado!=="Completada"));
+  const tareasComp=sortDesc(tareas.filter(t=>t.estado==="Completada"));
+  const urgentes=sortDesc(tareasActivas.filter(t=>t.urgencia==="Urgente"));
+  const enCurso=sortDesc(tareas.filter(t=>t.estado==="En curso"));
+  const huesped=sortDesc(tareas.filter(t=>t.huespedAlerta&&t.estado!=="Completada"));
+  const desdeLimpieza=sortDesc(tareas.filter(t=>t.origen==="reporte"&&t.estado!=="Completada"));
 
   const tareasF=tareas.filter(t=>{
     if(tab==="historial") return t.estado==="Completada";
