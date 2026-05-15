@@ -32,7 +32,6 @@ const PERSONAL   = ["Yo","Mantenimiento Alma Rentals","Obra"];
 const MONTHS     = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 const DIAS_CORTO = ["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
 
-const PAD      = n => String(n).padStart(2,"0");
 const FMT_DATE = d => { if(!d) return "—"; const [y,m,dd]=d.split("-"); return `${dd}/${m}/${y}`; };
 const TODAY    = new Date().toISOString().slice(0,10);
 
@@ -45,13 +44,18 @@ const S = {
   tag:     (bg,col,border)=>({background:bg,color:col,border:`1px solid ${border}`,borderRadius:20,fontSize:12,fontWeight:500,padding:"2px 10px",whiteSpace:"nowrap"}),
 };
 
-const urgStyle = u => URGENCIAS.find(x=>x.label===u)||URGENCIAS[2];
-const estStyle = e => {
+const urgStyle  = u => URGENCIAS.find(x=>x.label===u)||URGENCIAS[2];
+const estStyle  = e => {
   if(e==="Completada") return {bg:"#EAF3DE",text:"#3B6D11",border:"#97C459"};
   if(e==="En curso")   return {bg:"#E6F1FB",text:"#185FA5",border:"#85B7EB"};
   if(e==="Pausada")    return {bg:"#FAEEDA",text:"#854F0B",border:"#EF9F27"};
   return {bg:"#F1EFE8",text:"#5F5E5A",border:"#B4B2A9"};
 };
+const sortDesc  = arr => [...arr].sort((a,b)=>{
+  const fa=a.fechaCarga||a.fecha||"";
+  const fb=b.fechaCarga||b.fecha||"";
+  return fb.localeCompare(fa);
+});
 
 // ── Clasificador ──────────────────────────────────────────────────────────────
 function clasificarReporte(texto) {
@@ -72,7 +76,7 @@ function clasificarReporte(texto) {
       if(t.includes(w)) return {esMantenimiento:true,tipo,urgencia:urgFn(w)?"Urgente":"Media"};
   return {esMantenimiento:false};
 }
-const capitalizar = s => s?s.charAt(0).toUpperCase()+s.slice(1):"";
+const capitalizar = s => s ? s.charAt(0).toUpperCase()+s.slice(1) : "";
 
 // ── Firebase ──────────────────────────────────────────────────────────────────
 let firebaseLoaded=false, dbAlma=null, dbLimp=null;
@@ -363,7 +367,6 @@ function TareaForm({tarea,edificios,tipos,onSave,onClose}){
 }
 
 // ── Vista Semanal ─────────────────────────────────────────────────────────────
-// CAMBIO: tarjetas con botón editar + volver a pendiente, y separación Obra vs resto
 function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
   const [weekOff,setWeekOff]=useState(0);
   const [arrastrando,setArrastrando]=useState(null);
@@ -374,7 +377,6 @@ function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
   function onDrop(e,iso){e.preventDefault();if(!arrastrando) return;onMoverTarea(arrastrando.id,iso);setArrastrando(null);}
   function onDragOver(e){e.preventDefault();e.dataTransfer.dropEffect="move";}
 
-  // Tarjeta compacta con editar + quitar día
   function MiniCard({t,isDraggable=true}){
     const urg=urgStyle(t.urgencia);
     const esObra=t.asignado==="Obra";
@@ -383,13 +385,10 @@ function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
         draggable={isDraggable}
         onDragStart={isDraggable?e=>onDragStart(e,t):undefined}
         style={{
-          background: esObra ? "#2D1B69" : urg.bg,
+          background:esObra?"#2D1B69":urg.bg,
           border:`1.5px solid ${esObra?"#7C5CBF":urg.border}`,
-          borderRadius:8,
-          padding:"5px 7px",
-          marginBottom:4,
-          cursor:isDraggable?"grab":"default",
-          fontSize:11,
+          borderRadius:8,padding:"5px 7px",marginBottom:4,
+          cursor:isDraggable?"grab":"default",fontSize:11,
         }}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:4}}>
           <div style={{flex:1,minWidth:0}}>
@@ -400,16 +399,12 @@ function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
             )}
           </div>
           <div style={{display:"flex",gap:2,flexShrink:0,marginLeft:2}}>
-            <button
-              title="Editar"
-              onClick={e=>{e.stopPropagation();onEdit(t);}}
+            <button title="Editar" onClick={e=>{e.stopPropagation();onEdit(t);}}
               style={{background:"rgba(255,255,255,0.25)",border:"none",borderRadius:5,width:20,height:20,fontSize:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:esObra?"#C9B8FF":"#555"}}>
               ✏️
             </button>
             {t.fechaTrabajo&&(
-              <button
-                title="Volver a pendiente (quitar día asignado)"
-                onClick={e=>{e.stopPropagation();onQuitarDia(t.id);}}
+              <button title="Volver a pendiente" onClick={e=>{e.stopPropagation();onQuitarDia(t.id);}}
                 style={{background:"rgba(255,255,255,0.25)",border:"none",borderRadius:5,width:20,height:20,fontSize:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:esObra?"#C9B8FF":"#555"}}>
                 ↩
               </button>
@@ -420,7 +415,6 @@ function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
     );
   }
 
-  // Separar tareas por grupo dentro de un día
   function DiaColumn({iso}){
     const esHoy=iso===TODAY;
     const tsAsig=tareas.filter(t=>t.estado!=="Completada"&&t.fechaTrabajo===iso);
@@ -429,63 +423,44 @@ function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
     const obra=todas.filter(t=>t.asignado==="Obra");
     const resto=todas.filter(t=>t.asignado!=="Obra");
     return(
-      <div
-        onDragOver={onDragOver}
-        onDrop={e=>onDrop(e,iso)}
-        style={{
-          minHeight:180,
-          background:esHoy?"#E6F1FB":"#f7f6f2",
-          border:`2px ${esHoy?"solid #185FA5":"dashed #dddbd3"}`,
-          borderRadius:12,
-          padding:"0.5rem",
-          transition:"background 0.15s",
-        }}>
+      <div onDragOver={onDragOver} onDrop={e=>onDrop(e,iso)}
+        style={{minHeight:180,background:esHoy?"#E6F1FB":"#f7f6f2",border:`2px ${esHoy?"solid #185FA5":"dashed #dddbd3"}`,borderRadius:12,padding:"0.5rem",transition:"background 0.15s"}}>
         <p style={{margin:"0 0 6px",fontSize:12,fontWeight:700,color:esHoy?"#185FA5":"#888",textAlign:"center"}}>
           {DIAS_CORTO[new Date(iso+"T12:00:00").getDay()]}<br/>
           <span style={{fontSize:11,fontWeight:400}}>{FMT_DATE(iso)}</span>
         </p>
-
-        {/* Bloque Yo + Mantenimiento */}
         {resto.length>0&&(
           <div style={{marginBottom:6}}>
             <p style={{margin:"0 0 3px",fontSize:9,fontWeight:700,color:"#185FA5",textTransform:"uppercase",letterSpacing:"0.05em",borderBottom:"1px solid #c5d9ef",paddingBottom:2}}>🔧 Mantenimiento</p>
             {resto.map(t=><MiniCard key={t.id} t={t}/>)}
           </div>
         )}
-
-        {/* Bloque Obra */}
         {obra.length>0&&(
           <div>
             <p style={{margin:"0 0 3px",fontSize:9,fontWeight:700,color:"#9B7DD4",textTransform:"uppercase",letterSpacing:"0.05em",borderBottom:"1px solid #7C5CBF",paddingBottom:2}}>🏗️ Obra</p>
             {obra.map(t=><MiniCard key={t.id} t={t}/>)}
           </div>
         )}
-
         {todas.length===0&&<p style={{fontSize:11,color:"#bbb",textAlign:"center",marginTop:8}}>Sin tareas</p>}
       </div>
     );
   }
 
-  // Pendientes sin día: también separadas
   const sinDia=tareas.filter(t=>t.estado!=="Completada"&&!t.fechaTrabajo&&!weekDays.includes(t.fecha));
   const sinDiaResto=sinDia.filter(t=>t.asignado!=="Obra");
   const sinDiaObra=sinDia.filter(t=>t.asignado==="Obra");
 
   return(
     <div>
-      {/* Nav semana */}
       <div style={{display:"flex",alignItems:"center",gap:"1rem",marginBottom:"1.25rem",flexWrap:"wrap"}}>
         <button onClick={()=>setWeekOff(o=>o-1)} style={S.btn()}>◀</button>
         <p style={{margin:0,fontWeight:500,fontSize:15,flex:1,textAlign:"center"}}>📅 {labelSem}</p>
         <button onClick={()=>setWeekOff(0)} style={{...S.btn(weekOff===0?"#185FA5":undefined,weekOff===0?"#fff":undefined),fontSize:13,padding:"6px 14px"}}>Hoy</button>
         <button onClick={()=>setWeekOff(o=>o+1)} style={S.btn()}>▶</button>
       </div>
-
       <div style={{background:"#fff8e1",border:"1px solid #FFE082",borderRadius:12,padding:"0.75rem 1rem",marginBottom:"1rem",fontSize:13,color:"#795548"}}>
-        💡 Arrastrá las tareas hacia el día en que querés trabajarlas. Usá ✏️ para editar y ↩ para volver a pendiente sin día.
+        💡 Arrastrá las tareas hacia el día. ✏️ edita, ↩ quita el día asignado y vuelve a pendiente.
       </div>
-
-      {/* Leyenda */}
       <div style={{display:"flex",gap:12,marginBottom:"0.75rem",flexWrap:"wrap"}}>
         <span style={{display:"flex",alignItems:"center",gap:5,fontSize:12,color:"#185FA5",fontWeight:500}}>
           <span style={{width:12,height:12,borderRadius:3,background:"#E6F1FB",border:"1.5px solid #85B7EB",display:"inline-block"}}/>
@@ -496,16 +471,11 @@ function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
           🏗️ Obra
         </span>
       </div>
-
-      {/* Grid semanal */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:6}}>
         {weekDays.map(iso=><DiaColumn key={iso} iso={iso}/>)}
       </div>
-
-      {/* Pendientes sin día */}
       <div style={{marginTop:"1.25rem"}}>
         <p style={{margin:"0 0 0.75rem",fontWeight:500,fontSize:14,color:"#888"}}>📋 Pendientes sin día asignado esta semana</p>
-
         {sinDiaResto.length>0&&(
           <div style={{marginBottom:"0.75rem"}}>
             <p style={{margin:"0 0 0.5rem",fontSize:12,fontWeight:600,color:"#185FA5"}}>🔧 Mantenimiento</p>
@@ -514,7 +484,7 @@ function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
                 const urg=urgStyle(t.urgencia);
                 return(
                   <div key={t.id} draggable onDragStart={e=>onDragStart(e,t)}
-                    style={{background:urg.bg,border:`1px solid ${urg.border}`,borderRadius:8,padding:"6px 10px",cursor:"grab",fontSize:12,maxWidth:200,position:"relative"}}>
+                    style={{background:urg.bg,border:`1px solid ${urg.border}`,borderRadius:8,padding:"6px 10px",cursor:"grab",fontSize:12,maxWidth:200}}>
                     <div style={{display:"flex",justifyContent:"space-between",gap:4}}>
                       <div>
                         <p style={{margin:"0 0 2px",fontWeight:600,color:urg.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:150}}>{t.titulo}</p>
@@ -529,7 +499,6 @@ function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
             </div>
           </div>
         )}
-
         {sinDiaObra.length>0&&(
           <div>
             <p style={{margin:"0 0 0.5rem",fontSize:12,fontWeight:600,color:"#9B7DD4"}}>🏗️ Obra</p>
@@ -550,7 +519,6 @@ function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
             </div>
           </div>
         )}
-
         {sinDia.length===0&&<p style={{fontSize:13,color:"#aaa"}}>Todas las tareas tienen día asignado 👍</p>}
       </div>
     </div>
@@ -593,7 +561,10 @@ export default function App(){
     (async()=>{
       try{
         await loadFirebase();
-        const [t,e,ti,m,proc]=await Promise.all([aGet("alma_tasks"),aGet("alma_edificios"),aGet("alma_tipos"),aGet("alma_mensual"),aGet("alma_procesados")]);
+        const [t,e,ti,m,proc]=await Promise.all([
+          aGet("alma_tasks"),aGet("alma_edificios"),aGet("alma_tipos"),
+          aGet("alma_mensual"),aGet("alma_procesados"),
+        ]);
         if(!mounted) return;
         if(t) setTareasState(t);
         if(e) setEdificiosState(e);
@@ -610,6 +581,7 @@ export default function App(){
       }catch(err){console.error(err);if(mounted)setLoading(false);}
     })();
     return()=>{mounted=false;unsubs.current.forEach(u=>typeof u==="function"&&u());};
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
   const checkReportes=useCallback(async()=>{
@@ -648,6 +620,7 @@ export default function App(){
       await aSet("alma_tasks",tareasAct);
       setTareasState(tareasAct);
     }catch(e){console.error(e);}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
   const enviarLimpieza=useCallback(async tarea=>{
@@ -655,11 +628,19 @@ export default function App(){
     try{
       const lt=await lGet("lim_tasks")||[];
       if(lt.some(t=>t._almaId===tarea.id)) return;
-      const n={id:Date.now(),_almaId:tarea.id,depto:`${tarea.edificio} ${tarea.depto}`,fecha:tarea.fechaFin,tipo:"Otro",descripcion:`🔧 Post-mantenimiento: ${tarea.titulo}`,comentario:"Limpieza tras mantenimiento",asignado:"",completado:false,ingresos:[],minutosOtro:null,libre:false};
+      const n={
+        id:Date.now(),_almaId:tarea.id,
+        depto:`${tarea.edificio} ${tarea.depto}`,
+        fecha:tarea.fechaFin,tipo:"Otro",
+        descripcion:`🔧 Post-mantenimiento: ${tarea.titulo}`,
+        comentario:"Limpieza tras mantenimiento",
+        asignado:"",completado:false,ingresos:[],minutosOtro:null,libre:false,
+      };
       const {doc,setDoc}=window._fb;
       await setDoc(doc(dbLimp,"limpiezas","lim_tasks"),{value:JSON.stringify([...lt,n])});
       showToast("🧹 Tarea de limpieza enviada");
     }catch(e){console.error(e);}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
   const saveTarea=useCallback(async f=>{
@@ -675,7 +656,8 @@ export default function App(){
       const nt={...f,id:nextId.current++,fechaCarga:TODAY,historial:[`Creada el ${hoy}`]};
       lista=[...tareas,nt];
     }
-    await saveTareas(lista);setEditando(null);
+    await saveTareas(lista);
+    setEditando(null);
   },[editando,tareas,saveTareas]);
 
   const cambiarEstado=useCallback(async(id,nuevoEstado)=>{
@@ -694,25 +676,23 @@ export default function App(){
   const guardarComentario=useCallback(async(id,comentario)=>{
     await saveTareas(tareas.map(t=>t.id===id?{...t,comentario}:t));
     showToast("💬 Comentario guardado");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   },[tareas,saveTareas]);
 
   const moverTarea=useCallback(async(id,fechaTrabajo)=>{
     await saveTareas(tareas.map(t=>t.id===id?{...t,fechaTrabajo}:t));
   },[tareas,saveTareas]);
 
-  // CAMBIO: quitar día asignado (volver a pendiente en organización)
   const quitarDiaTarea=useCallback(async id=>{
-    await saveTareas(tareas.map(t=>t.id===id?{...t,fechaTrabajo:undefined}:t));
+    await saveTareas(tareas.map(t=>{
+      if(t.id!==id) return t;
+      const {fechaTrabajo:_,...rest}=t;
+      return rest;
+    }));
   },[tareas,saveTareas]);
 
-  // Ordenar por fechaCarga desc (más nueva primero)
-  const sortDesc = arr => [...arr].sort((a,b)=>{
-    const fa=a.fechaCarga||a.fecha||""; const fb=b.fechaCarga||b.fecha||"";
-    return fb.localeCompare(fa);
-  });
   const tareasActivas=sortDesc(tareas.filter(t=>t.estado!=="Completada"));
   const tareasComp=sortDesc(tareas.filter(t=>t.estado==="Completada"));
-  // CAMBIO: dashboard sections también sorted por fechaCarga desc
   const urgentes=sortDesc(tareasActivas.filter(t=>t.urgencia==="Urgente"));
   const enCurso=sortDesc(tareas.filter(t=>t.estado==="En curso"));
   const huesped=sortDesc(tareas.filter(t=>t.huespedAlerta&&t.estado!=="Completada"));
@@ -800,7 +780,6 @@ export default function App(){
                 </div>
               ))}
             </div>
-            {/* CAMBIO: todas las listas del dashboard usan sortDesc → más nueva primero */}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem"}}>
               <div style={S.section}>
                 <p style={{margin:"0 0 0.75rem",fontWeight:600,fontSize:15,color:"#A32D2D"}}>🔴 Urgentes activas</p>
@@ -897,15 +876,16 @@ export default function App(){
                 ))}
               </div>
             </div>
-            {tareasF.length===0?<p style={{textAlign:"center",color:"#888",marginTop:"2rem",fontSize:15}}>No hay tareas con esos filtros.</p>
-              :tareasF.map(t=><TareaCard key={t.id} t={t} onEdit={tt=>{setEditando(tt);setShowForm(true);}} onEstado={cambiarEstado} onDelete={eliminarTarea} onComentario={guardarComentario}/>)}
+            {tareasF.length===0
+              ?<p style={{textAlign:"center",color:"#888",marginTop:"2rem",fontSize:15}}>No hay tareas con esos filtros.</p>
+              :sortDesc(tareasF).map(t=><TareaCard key={t.id} t={t} onEdit={tt=>{setEditando(tt);setShowForm(true);}} onEstado={cambiarEstado} onDelete={eliminarTarea} onComentario={guardarComentario}/>)
+            }
           </div>
         )}
 
         {/* ORGANIZACIÓN SEMANAL */}
         {tab==="semanal"&&(
           <div style={S.section}>
-            {/* CAMBIO: se pasan onEdit y onQuitarDia */}
             <VistaSemanal
               tareas={tareasActivas}
               onMoverTarea={moverTarea}
@@ -987,15 +967,19 @@ export default function App(){
                     const histCount=tareas.filter(t=>t.edificio===ed&&t.depto===d&&t.estado==="Completada").length;
                     return(
                       <div key={d} onClick={()=>setDeptoModal({edificio:ed,depto:d})}
-                        style={{background:alerta?"#FAECE7":urg?"#FCEBEB":desdeRep?"#FFF3E0":"#fff",
+                        style={{
+                          background:alerta?"#FAECE7":urg?"#FCEBEB":desdeRep?"#FFF3E0":"#fff",
                           border:`1.5px solid ${alerta?"#F5C4B3":urg?"#F09595":desdeRep?"#FFB74D":"#dddbd3"}`,
-                          borderRadius:10,padding:"0.75rem",textAlign:"center",cursor:"pointer",transition:"transform 0.15s,box-shadow 0.15s"}}
+                          borderRadius:10,padding:"0.75rem",textAlign:"center",cursor:"pointer",transition:"transform 0.15s,box-shadow 0.15s",
+                        }}
                         onMouseEnter={e=>{e.currentTarget.style.transform="scale(1.04)";e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,0.12)";}}
                         onMouseLeave={e=>{e.currentTarget.style.transform="scale(1)";e.currentTarget.style.boxShadow="none";}}>
                         <p style={{margin:"0 0 4px",fontWeight:600,fontSize:15}}>{d}</p>
                         {alerta&&<p style={{margin:"0 0 2px",fontSize:11,color:"#993C1D"}}>⚠ Huésped</p>}
                         {desdeRep&&<p style={{margin:"0 0 2px",fontSize:11,color:"#E65100"}}>🔗 Reporte</p>}
-                        {ts.length>0?<span style={S.tag(urg?"#FCEBEB":"#E6F1FB",urg?"#A32D2D":"#185FA5",urg?"#F09595":"#85B7EB")}>{ts.length} activa{ts.length>1?"s":""}</span>:<span style={{fontSize:12,color:"#aaa"}}>Libre</span>}
+                        {ts.length>0
+                          ?<span style={S.tag(urg?"#FCEBEB":"#E6F1FB",urg?"#A32D2D":"#185FA5",urg?"#F09595":"#85B7EB")}>{ts.length} activa{ts.length>1?"s":""}</span>
+                          :<span style={{fontSize:12,color:"#aaa"}}>Libre</span>}
                         {histCount>0&&<p style={{margin:"4px 0 0",fontSize:11,color:"#aaa"}}>📋 {histCount} completada{histCount>1?"s":""}</p>}
                         <p style={{margin:"4px 0 0",fontSize:11,color:"#185FA5",fontWeight:500}}>Ver historial →</p>
                       </div>
@@ -1011,8 +995,10 @@ export default function App(){
         {tab==="historial"&&(
           <div>
             <p style={{fontWeight:500,fontSize:16,marginBottom:"1rem"}}>Historial de tareas completadas ({tareasComp.length})</p>
-            {tareasComp.length===0?<p style={{textAlign:"center",color:"#888",fontSize:15,marginTop:"2rem"}}>Aún no hay completadas.</p>
-              :tareasComp.map(t=><TareaCard key={t.id} t={t} onEdit={tt=>{setEditando(tt);setShowForm(true);}} onEstado={cambiarEstado} onDelete={eliminarTarea} onComentario={guardarComentario}/>)}
+            {tareasComp.length===0
+              ?<p style={{textAlign:"center",color:"#888",fontSize:15,marginTop:"2rem"}}>Aún no hay completadas.</p>
+              :tareasComp.map(t=><TareaCard key={t.id} t={t} onEdit={tt=>{setEditando(tt);setShowForm(true);}} onEstado={cambiarEstado} onDelete={eliminarTarea} onComentario={guardarComentario}/>)
+            }
           </div>
         )}
 
