@@ -75,7 +75,12 @@ const deduplicar = arr => {
 function clasificarReporte(texto) {
   const t=(texto||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
   const noMante=["olvido","olvide","perdido","perdida","objeto","ropa","vajilla","vaso","vasos","taza","plato","cubierto","falta reponer","reponer","amenities","toalla falta","sabana","papel higienico","shampoo","jabon","sucio","sucia","limpieza","mancha","olor","basura","mugre"];
+  // Si hay palabras de mantenimiento estructural, no las filtramos aunque suenen a limpieza
+  const forzarMante=["flojo","floja","salido","salida","caido","caida","suelto","suelta","roto","rota","desprendido","desprendida","caída","aflojado","torcido","rajadura","grieta","quebrado","quebrada"];
+  const esForzado = forzarMante.some(p=>t.includes(p));
+  if(!esForzado) {
   for(const p of noMante) if(t.includes(p)) return {esMantenimiento:false};
+  }
   const checks=[
     {words:["sin luz","no hay luz","no anda la luz","disyuntor","tablero","tomacorriente","enchufe","lampara","electricidad","electrico","calefactor","aire acondicionado","no enfria","no calienta"],tipo:"Eléctrica",urgFn:w=>w==="sin luz"||w==="no hay luz"},
     {words:["sin agua","no sale agua","perdida de agua","inundacion","canilla","caño","pileta","inodoro","ducha","gotea","presion","desague","humedad","calefon","termotanque","baño"],tipo:"Sanitaria",urgFn:w=>w==="sin agua"||w==="no sale agua"||w==="inundacion"},
@@ -83,7 +88,7 @@ function clasificarReporte(texto) {
     {words:["caja fuerte","cerradura","no abre","no cierra","traba","cerrojo","puerta trabada","candado","pomo","llave"],tipo:"Cerrajería",urgFn:()=>false},
     {words:["caido","roto","rajado","rajadura","grieta","pared","techo","piso","baldosa","azulejo","estante","madera","bisagra","ventana rota","vidrio","persiana","espejo"],tipo:"Albañilería",urgFn:()=>false},
     {words:["reja","baranda","barandal","oxidado"],tipo:"Herrería",urgFn:()=>false},
-    {words:["no funciona","no anda","no sirve","daño","dañado","falla","desprendido","caída"],tipo:"General",urgFn:()=>false},
+    {words:["no funciona","no anda","no sirve","daño","dañado","falla","desprendido","caída","flojo","floja","salido","salida","caido","caída","caida","suelto","suelta","roto","rota","quebrado","quebrada","desprendido","desprendida","aflojado","torcido"],tipo:"General",urgFn:()=>false},
   ];
   for(const {words,tipo,urgFn} of checks)
     for(const w of words)
@@ -737,6 +742,23 @@ export default function App(){
         if(pv) setPrevDataState(pv);
         if(proc){procesadosRef.current=new Set(proc);setProcesadosIds(new Set(proc));}
         if(pers) setPersonalState(pers);
+
+        // Retroactivo: asegurar que todas las tareas migradas de reportes tengan origen="reporte"
+        if(t) {
+          const repsData = await lGet("lim_reports").catch(()=>null);
+          const repIds = new Set((repsData||[]).map(r=>String(r.id)));
+          let changed = false;
+          const tFixed = deduplicar(t).map(task => {
+            if(task.reporteId && task.origen !== "reporte") { changed=true; return {...task, origen:"reporte"}; }
+            // Si tiene historial con "Migrada automáticamente" y no tiene origen
+            if(!task.origen && task.historial?.some(h=>h.includes("Migrada automáticamente"))) {
+              changed=true; return {...task, origen:"reporte"};
+            }
+            return task;
+          });
+          if(changed) { await aSet("alma_tasks", tFixed); setTareasState(tFixed); }
+        }
+
         const u1=aListen("alma_tasks",d=>{if(mounted&&d)setTareasState(deduplicar(d));});
         const u2=aListen("alma_preventivo",d=>{if(mounted&&d)setPrevDataState(d);});
         unsubs.current.push(u1,u2);
