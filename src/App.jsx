@@ -1,3 +1,4 @@
+// ── AlmaDesk · versión actualizada ────────────────────────────────────────────
 import { useState, useEffect, useRef, useCallback } from "react";
 
 const FIREBASE_CONFIG_ALMA = {
@@ -27,13 +28,14 @@ const URGENCIAS = [
   {label:"Baja",   bg:"#EAF3DE",text:"#3B6D11",border:"#97C459"},
 ];
 const TIPOS_INIT = ["Eléctrica","Sanitaria","Pintura","Obra mayor","Albañilería","Herrería","Gas","Limpieza","Cerrajería","General","Otro"];
-const ESTADOS    = ["Pendiente","En curso","Pausada","Completada"];
-const PERSONAL   = ["Yo","Mantenimiento Alma Rentals","Obra"];
-const MONTHS     = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+// Estados ahora incluye "Asignada"
+const ESTADOS = ["Pendiente","Asignada","En curso","Pausada","Completada"];
+const PERSONAL_INIT = ["Yo","Mantenimiento Alma Rentals","Obra"];
+const MONTHS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 const DIAS_CORTO = ["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
 
 const FMT_DATE = d => { if(!d) return "—"; const [y,m,dd]=d.split("-"); return `${dd}/${m}/${y}`; };
-const TODAY    = new Date().toISOString().slice(0,10);
+const TODAY = new Date().toISOString().slice(0,10);
 const CURRENT_MONTH = TODAY.slice(0,7);
 
 const S = {
@@ -50,6 +52,7 @@ const estStyle = e => {
   if(e==="Completada") return {bg:"#EAF3DE",text:"#3B6D11",border:"#97C459"};
   if(e==="En curso")   return {bg:"#E6F1FB",text:"#185FA5",border:"#85B7EB"};
   if(e==="Pausada")    return {bg:"#FAEEDA",text:"#854F0B",border:"#EF9F27"};
+  if(e==="Asignada")   return {bg:"#F3E8FF",text:"#6B21A8",border:"#C084FC"};
   return {bg:"#F1EFE8",text:"#5F5E5A",border:"#B4B2A9"};
 };
 const sortDesc = arr => [...arr].sort((a,b)=>{
@@ -57,6 +60,17 @@ const sortDesc = arr => [...arr].sort((a,b)=>{
   const fb=b.fechaCarga||b.fecha||"";
   return fb.localeCompare(fa);
 });
+
+// Deduplicar tareas por id
+const deduplicar = arr => {
+  const seen = new Set();
+  return arr.filter(t => {
+    const k = String(t.id);
+    if(seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+};
 
 function clasificarReporte(texto) {
   const t=(texto||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
@@ -92,13 +106,7 @@ async function loadFirebase(){
 async function aSet(k,v){const {doc,setDoc}=window._fb;await setDoc(doc(dbAlma,"alma",String(k)),{value:JSON.stringify(v)});}
 async function aGet(k){const {doc,getDoc}=window._fb;const s=await getDoc(doc(dbAlma,"alma",String(k)));return s.exists()?JSON.parse(s.data().value):null;}
 function aListen(k,cb){const {doc,onSnapshot}=window._fb;return onSnapshot(doc(dbAlma,"alma",String(k)),s=>{cb(s.exists()?JSON.parse(s.data().value):null);});}
-
-// FIX: lGet con collection correcta de limpieza
-async function lGet(col,k){
-  const {doc,getDoc}=window._fb;
-  const s=await getDoc(doc(dbLimp,col,String(k)));
-  return s.exists()?JSON.parse(s.data().value):null;
-}
+async function lGet(k){const {doc,getDoc}=window._fb;const s=await getDoc(doc(dbLimp,"limpiezas",String(k)));return s.exists()?JSON.parse(s.data().value):null;}
 
 function resizePhoto(file,cb){
   const r=new FileReader();
@@ -131,6 +139,26 @@ function Modal({onClose,children,wide}){
       style={{position:"fixed",inset:0,background:"rgba(10,10,20,0.65)",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
       <div style={{background:"#fff",borderRadius:18,padding:"2rem",width:"100%",maxWidth:wide?820:560,maxHeight:"92vh",overflowY:"auto",boxShadow:"0 12px 48px rgba(0,0,0,0.25)"}}>
         {children}
+      </div>
+    </div>
+  );
+}
+
+// Modal para elegir fecha de inicio al comenzar tarea
+function ModalIniciarFecha({tarea, onConfirm, onClose}){
+  const [fecha, setFecha] = useState(tarea.fecha || TODAY);
+  return (
+    <div onClick={e=>{if(e.target===e.currentTarget)onClose();}}
+      style={{position:"fixed",inset:0,background:"rgba(10,10,20,0.65)",zIndex:3500,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
+      <div style={{background:"#fff",borderRadius:18,padding:"2rem",width:"100%",maxWidth:380,boxShadow:"0 12px 48px rgba(0,0,0,0.25)"}}>
+        <h3 style={{margin:"0 0 1rem",fontSize:16,fontWeight:600}}>▶ Iniciar tarea</h3>
+        <p style={{margin:"0 0 0.75rem",fontSize:14,color:"#555"}}>¿Desde qué fecha comienza el trabajo?</p>
+        <label style={S.label}>Fecha de inicio</label>
+        <input type="date" style={{...S.input,marginBottom:"1.25rem"}} value={fecha} onChange={e=>setFecha(e.target.value)}/>
+        <div style={{display:"flex",gap:"0.75rem",justifyContent:"flex-end"}}>
+          <button onClick={onClose} style={S.btn()}>Cancelar</button>
+          <button onClick={()=>{onConfirm(fecha);onClose();}} style={{...S.btn("#185FA5","#fff"),padding:"9px 22px"}}>▶ Iniciar</button>
+        </div>
       </div>
     </div>
   );
@@ -196,41 +224,42 @@ function OrigenBadge({origen}){
   return <span style={{...S.tag(c.bg,c.color,c.border),fontSize:11}}>{c.label}</span>;
 }
 
-// FIX: TareaCard con highlight naranja para reportes
-function TareaCard({t,onEdit,onEstado,onDelete,onComentario}){
+function TareaCard({t,onEdit,onEstado,onDelete,onComentario,onIniciar}){
   const urg=urgStyle(t.urgencia),est=estStyle(t.estado);
   const [open,setOpen]=useState(false);
   const [com,setCom]=useState(t.comentario||"");
   const foto=t.foto||t.fotoReporte||null;
-  const esReporte=t.origen==="reporte";
 
-  const cardStyle={
-    ...S.card,
-    borderLeft:`5px solid ${esReporte?"#E65100":urg.border}`,
-    background: esReporte?"#FFFBF5":"#fff",
-    border: esReporte?"1px solid #FFB74D":"1px solid #e2e0d8",
-    borderLeftWidth:5,
-    borderLeftColor: esReporte?"#E65100":urg.border,
-  };
+  // Distintivo de día asignado
+  const tienesDia = !!t.fechaTrabajo;
 
   return(
-    <div style={cardStyle}>
+    <div style={{
+      ...S.card,
+      borderLeft:`5px solid ${urg.border}`,
+      background: tienesDia ? "#F5F0FF" : "#fff",
+      border: tienesDia ? "1.5px solid #C084FC" : "1px solid #e2e0d8",
+    }}>
+      {tienesDia && (
+        <div style={{marginBottom:6,display:"flex",alignItems:"center",gap:6}}>
+          <span style={{...S.tag("#F3E8FF","#6B21A8","#C084FC"),fontSize:11}}>📅 Asignada: {FMT_DATE(t.fechaTrabajo)}</span>
+        </div>
+      )}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
         <div style={{flex:1,minWidth:0}}>
           <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:6}}>
-            {esReporte&&<span style={{...S.tag("#FFF3E0","#E65100","#FFB74D"),fontSize:11,fontWeight:700}}>🔗 Reporte</span>}
             {t.huespedAlerta&&<span style={S.tag("#FAECE7","#993C1D","#F5C4B3")}>⚠ Huésped</span>}
             <span style={S.tag(urg.bg,urg.text,urg.border)}>{t.urgencia}</span>
             <span style={S.tag(est.bg,est.text,est.border)}>{t.estado}</span>
             <span style={S.tag("#F1EFE8","#5F5E5A","#B4B2A9")}>{t.tipo}</span>
             {t.recurrente&&<span style={S.tag("#E6F1FB","#185FA5","#85B7EB")}>🔁 Mensual</span>}
             {t.limpieza&&<span style={S.tag("#EEEDFE","#534AB7","#AFA9EC")}>🧹 Limpieza</span>}
+            <OrigenBadge origen={t.origen}/>
           </div>
           <p style={{margin:"0 0 3px",fontWeight:600,fontSize:16}}>{t.titulo}</p>
           <p style={{margin:0,fontSize:13,color:"#888"}}>
             🏢 {t.edificio} · {t.depto||"—"} | 👤 {t.asignado} | 📅 {FMT_DATE(t.fecha)}{t.fechaFin?` → ${FMT_DATE(t.fechaFin)}`:""}
           </p>
-          {t.fechaTrabajo&&<p style={{margin:"2px 0 0",fontSize:12,color:"#185FA5",fontWeight:500}}>📆 Agendada: {FMT_DATE(t.fechaTrabajo)}</p>}
           {t.fechaCarga&&<p style={{margin:"2px 0 0",fontSize:11,color:"#bbb"}}>Cargada: {FMT_DATE(t.fechaCarga)}</p>}
           {t.materiales&&<p style={{margin:"2px 0 0",fontSize:13,color:"#888"}}>🔧 {t.materiales}</p>}
           {foto&&<img src={foto} alt="foto" style={{marginTop:8,maxWidth:160,borderRadius:8,border:"1px solid #e2e0d8",cursor:"zoom-in",display:"block"}} onClick={()=>window.open(foto,"_blank")}/>}
@@ -250,12 +279,15 @@ function TareaCard({t,onEdit,onEstado,onDelete,onComentario}){
             <button onClick={()=>onComentario(t.id,com)} style={{...S.btn("#185FA5","#fff"),marginTop:6,padding:"5px 14px",fontSize:12}}>💾 Guardar</button>
           </div>
           <div style={{display:"flex",gap:"0.5rem",flexWrap:"wrap",marginBottom:"0.75rem"}}>
-            {t.estado!=="En curso"&&t.estado!=="Completada"&&<button onClick={()=>onEstado(t.id,"En curso")} style={S.btn("#185FA5","#fff")}>▶ Iniciar</button>}
+            {/* Iniciar — abre modal para elegir fecha de inicio */}
+            {t.estado!=="En curso"&&t.estado!=="Completada"&&(
+              <button onClick={()=>onIniciar(t)} style={S.btn("#185FA5","#fff")}>▶ Iniciar</button>
+            )}
             {t.estado==="En curso"&&<>
               <button onClick={()=>onEstado(t.id,"Completada")} style={S.btn("#3B6D11","#fff")}>✔ Finalizar</button>
               <button onClick={()=>onEstado(t.id,"Pausada")} style={S.btn("#854F0B","#fff")}>⏸ Pausar</button>
             </>}
-            {t.estado==="Pausada"&&<button onClick={()=>onEstado(t.id,"En curso")} style={S.btn("#185FA5","#fff")}>▶ Reanudar</button>}
+            {t.estado==="Pausada"&&<button onClick={()=>onIniciar(t)} style={S.btn("#185FA5","#fff")}>▶ Reanudar</button>}
             {t.estado==="Completada"&&<button onClick={()=>onEstado(t.id,"Pendiente")} style={S.btn()}>↩ Reabrir</button>}
           </div>
           {t.historial?.length>0&&(
@@ -270,7 +302,7 @@ function TareaCard({t,onEdit,onEstado,onDelete,onComentario}){
   );
 }
 
-function TareaForm({tarea,edificios,tipos,onSave,onClose}){
+function TareaForm({tarea,edificios,tipos,personal,onSave,onClose}){
   const blank={titulo:"",edificio:"QDB",depto:"",tipo:"General",asignado:"Yo",urgencia:"Baja",
     estado:"Pendiente",fechaCarga:TODAY,fecha:"",fechaFin:"",descripcion:"",materiales:"",comentario:"",
     foto:null,limpieza:false,recurrente:false,huespedAlerta:false,historial:[]};
@@ -309,7 +341,7 @@ function TareaForm({tarea,edificios,tipos,onSave,onClose}){
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"1rem"}}>
           <div><label style={S.label}>Asignado a</label>
             <select style={S.input} value={f.asignado} onChange={e=>set("asignado",e.target.value)}>
-              {PERSONAL.map(p=><option key={p}>{p}</option>)}
+              {personal.map(p=><option key={p}>{p}</option>)}
             </select>
           </div>
           <div><label style={S.label}>Urgencia</label>
@@ -372,12 +404,9 @@ function TareaForm({tarea,edificios,tipos,onSave,onClose}){
   );
 }
 
-// ── Vista Semanal con FIX de pendientes + mover a día ─────────────────────────
 function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
   const [weekOff,setWeekOff]=useState(0);
   const [arrastrando,setArrastrando]=useState(null);
-  const [moverModal,setMoverModal]=useState(null); // tarea a mover manualmente
-  const [fechaElegida,setFechaElegida]=useState("");
   const weekDays=getWeekDays(TODAY,weekOff);
   const labelSem=`${FMT_DATE(weekDays[0])} — ${FMT_DATE(weekDays[6])}`;
 
@@ -385,30 +414,19 @@ function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
   function onDrop(e,iso){e.preventDefault();if(!arrastrando)return;onMoverTarea(arrastrando.id,iso);setArrastrando(null);}
   function onDragOver(e){e.preventDefault();}
 
-  // FIX: pendientes sin día = no tienen fechaTrabajo asignado (independiente de la semana visible)
-  const sinDia=tareas.filter(t=>t.estado!=="Completada"&&!t.fechaTrabajo);
-  const sinDiaResto=sinDia.filter(t=>t.asignado!=="Obra");
-  const sinDiaObra=sinDia.filter(t=>t.asignado==="Obra");
-
   function MiniCard({t}){
     const urg=urgStyle(t.urgencia);
     const esObra=t.asignado==="Obra";
-    const esRep=t.origen==="reporte";
-    const bg=esObra?"#2D1B69":esRep?"#FFF3E0":urg.bg;
-    const border=esObra?"#7C5CBF":esRep?"#FFB74D":urg.border;
-    const textColor=esObra?"#C9B8FF":esRep?"#E65100":urg.text;
-    const subColor=esObra?"#A084E8":esRep?"#E65100":urg.text;
     return(
       <div draggable onDragStart={e=>onDragStart(e,t)}
-        style={{background:bg,border:`1.5px solid ${border}`,borderRadius:8,padding:"5px 7px",marginBottom:4,cursor:"grab",fontSize:11}}>
+        style={{background:esObra?"#2D1B69":urg.bg,border:`1.5px solid ${esObra?"#7C5CBF":urg.border}`,borderRadius:8,padding:"5px 7px",marginBottom:4,cursor:"grab",fontSize:11}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:4}}>
           <div style={{flex:1,minWidth:0}}>
-            <p style={{margin:"0 0 1px",fontWeight:600,color:textColor,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.titulo}</p>
-            <p style={{margin:0,color:subColor,opacity:0.85,fontSize:10}}>{t.edificio} · {t.depto}</p>
+            <p style={{margin:"0 0 1px",fontWeight:600,color:esObra?"#C9B8FF":urg.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.titulo}</p>
+            <p style={{margin:0,color:esObra?"#A084E8":urg.text,opacity:0.85,fontSize:10}}>{t.edificio} · {t.depto}</p>
           </div>
           <div style={{display:"flex",gap:2,flexShrink:0}}>
             <button title="Editar" onClick={e=>{e.stopPropagation();onEdit(t);}} style={{background:"rgba(255,255,255,0.25)",border:"none",borderRadius:5,width:20,height:20,fontSize:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✏️</button>
-            <button title="Mover a día" onClick={e=>{e.stopPropagation();setMoverModal(t);setFechaElegida(t.fechaTrabajo||TODAY);}} style={{background:"rgba(255,255,255,0.25)",border:"none",borderRadius:5,width:20,height:20,fontSize:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>📅</button>
             {t.fechaTrabajo&&<button title="Quitar día" onClick={e=>{e.stopPropagation();onQuitarDia(t.id);}} style={{background:"rgba(255,255,255,0.25)",border:"none",borderRadius:5,width:20,height:20,fontSize:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>↩</button>}
           </div>
         </div>
@@ -418,11 +436,10 @@ function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
 
   function DiaCol({iso}){
     const esHoy=iso===TODAY;
+    // Solo tareas con fechaTrabajo en este día
     const tsAsig=tareas.filter(t=>t.estado!=="Completada"&&t.fechaTrabajo===iso);
-    const tsOrig=tareas.filter(t=>t.estado!=="Completada"&&!t.fechaTrabajo&&t.fecha===iso);
-    const todas=[...tsAsig,...tsOrig.filter(t=>!tsAsig.find(a=>a.id===t.id))];
-    const obra=todas.filter(t=>t.asignado==="Obra");
-    const resto=todas.filter(t=>t.asignado!=="Obra");
+    const obra=tsAsig.filter(t=>t.asignado==="Obra");
+    const resto=tsAsig.filter(t=>t.asignado!=="Obra");
     return(
       <div onDragOver={onDragOver} onDrop={e=>onDrop(e,iso)}
         style={{minHeight:180,background:esHoy?"#E6F1FB":"#f7f6f2",border:`2px ${esHoy?"solid #185FA5":"dashed #dddbd3"}`,borderRadius:12,padding:"0.5rem",transition:"background 0.15s"}}>
@@ -438,29 +455,18 @@ function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
           <p style={{margin:"0 0 3px",fontSize:9,fontWeight:700,color:"#9B7DD4",textTransform:"uppercase",borderBottom:"1px solid #7C5CBF",paddingBottom:2}}>🏗️ Obra</p>
           {obra.map(t=><MiniCard key={t.id} t={t}/>)}
         </div>}
-        {todas.length===0&&<p style={{fontSize:11,color:"#bbb",textAlign:"center",marginTop:8}}>Sin tareas</p>}
+        {tsAsig.length===0&&<p style={{fontSize:11,color:"#bbb",textAlign:"center",marginTop:8}}>Sin tareas</p>}
       </div>
     );
   }
 
+  // Pendientes SIN fechaTrabajo asignada (no se muestran las que ya tienen día)
+  const sinDia=tareas.filter(t=>t.estado!=="Completada"&&!t.fechaTrabajo);
+  const sinDiaResto=sinDia.filter(t=>t.asignado!=="Obra");
+  const sinDiaObra=sinDia.filter(t=>t.asignado==="Obra");
+
   return(
     <div>
-      {/* Modal mover a día */}
-      {moverModal&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(10,10,20,0.6)",zIndex:3000,display:"flex",alignItems:"center",justifyContent:"center"}}>
-          <div style={{background:"#fff",borderRadius:16,padding:"1.5rem",width:320,boxShadow:"0 12px 48px rgba(0,0,0,0.25)"}}>
-            <p style={{margin:"0 0 4px",fontWeight:600,fontSize:16}}>📅 Mover tarea</p>
-            <p style={{margin:"0 0 1rem",fontSize:13,color:"#888",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{moverModal.titulo}</p>
-            <label style={S.label}>Elegí el día de trabajo</label>
-            <input type="date" style={{...S.input,marginBottom:"1rem"}} value={fechaElegida} onChange={e=>setFechaElegida(e.target.value)}/>
-            <div style={{display:"flex",gap:"0.5rem",justifyContent:"flex-end"}}>
-              <button onClick={()=>setMoverModal(null)} style={S.btn()}>Cancelar</button>
-              <button onClick={()=>{if(fechaElegida){onMoverTarea(moverModal.id,fechaElegida);setMoverModal(null);}}} style={{...S.btn("#185FA5","#fff")}}>Confirmar</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div style={{display:"flex",alignItems:"center",gap:"1rem",marginBottom:"1.25rem",flexWrap:"wrap"}}>
         <button onClick={()=>setWeekOff(o=>o-1)} style={S.btn()}>◀</button>
         <p style={{margin:0,fontWeight:500,fontSize:15,flex:1,textAlign:"center"}}>📅 {labelSem}</p>
@@ -468,33 +474,27 @@ function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
         <button onClick={()=>setWeekOff(o=>o+1)} style={S.btn()}>▶</button>
       </div>
       <div style={{background:"#fff8e1",border:"1px solid #FFE082",borderRadius:12,padding:"0.75rem 1rem",marginBottom:"1rem",fontSize:13,color:"#795548"}}>
-        💡 Arrastrá las tareas hacia el día o usá 📅 para elegir cualquier fecha. ↩ quita el día asignado.
+        💡 Arrastrá las tareas hacia el día. ✏️ edita, ↩ quita el día asignado.
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:6,marginBottom:"1.5rem"}}>
         {weekDays.map(iso=><DiaCol key={iso} iso={iso}/>)}
       </div>
       <div>
         <p style={{margin:"0 0 0.75rem",fontWeight:600,fontSize:14,color:"#555"}}>📋 Pendientes sin día asignado ({sinDia.length})</p>
-        {sinDia.length===0&&<p style={{fontSize:13,color:"#aaa"}}>Todas las tareas tienen día asignado 👍</p>}
         {sinDiaResto.length>0&&<div style={{marginBottom:"0.75rem"}}>
           <p style={{margin:"0 0 0.5rem",fontSize:12,fontWeight:600,color:"#185FA5"}}>🔧 Mantenimiento ({sinDiaResto.length})</p>
           <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
             {sinDiaResto.map(t=>{
               const urg=urgStyle(t.urgencia);
-              const esRep=t.origen==="reporte";
               return(
                 <div key={t.id} draggable onDragStart={e=>onDragStart(e,t)}
-                  style={{background:esRep?"#FFF3E0":urg.bg,border:`1px solid ${esRep?"#FFB74D":urg.border}`,borderRadius:8,padding:"6px 10px",cursor:"grab",fontSize:12,maxWidth:200}}>
-                  <div style={{display:"flex",justifyContent:"space-between",gap:4,alignItems:"flex-start"}}>
+                  style={{background:urg.bg,border:`1px solid ${urg.border}`,borderRadius:8,padding:"6px 10px",cursor:"grab",fontSize:12,maxWidth:200}}>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:4}}>
                     <div>
-                      {esRep&&<span style={{fontSize:10,color:"#E65100",fontWeight:700}}>🔗 </span>}
-                      <p style={{margin:"0 0 2px",fontWeight:600,color:esRep?"#E65100":urg.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:130,display:"inline"}}>{t.titulo}</p>
-                      <p style={{margin:0,color:esRep?"#E65100":urg.text,opacity:0.8,fontSize:11}}>{t.edificio} · {t.depto}</p>
+                      <p style={{margin:"0 0 2px",fontWeight:600,color:urg.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:150}}>{t.titulo}</p>
+                      <p style={{margin:0,color:urg.text,opacity:0.8,fontSize:11}}>{t.edificio} · {t.depto}</p>
                     </div>
-                    <div style={{display:"flex",gap:2,flexShrink:0}}>
-                      <button onClick={e=>{e.stopPropagation();onEdit(t);}} style={{background:"rgba(0,0,0,0.08)",border:"none",borderRadius:4,width:18,height:18,fontSize:9,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✏️</button>
-                      <button onClick={e=>{e.stopPropagation();setMoverModal(t);setFechaElegida(TODAY);}} style={{background:"rgba(0,0,0,0.08)",border:"none",borderRadius:4,width:18,height:18,fontSize:9,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>📅</button>
-                    </div>
+                    <button onClick={e=>{e.stopPropagation();onEdit(t);}} style={{background:"rgba(0,0,0,0.08)",border:"none",borderRadius:4,width:18,height:18,fontSize:9,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✏️</button>
                   </div>
                 </div>
               );
@@ -513,6 +513,7 @@ function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
             ))}
           </div>
         </div>}
+        {sinDia.length===0&&<p style={{fontSize:13,color:"#aaa"}}>Todas las tareas tienen día asignado 👍</p>}
       </div>
     </div>
   );
@@ -522,84 +523,54 @@ function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
 function Preventivo({edificios, prevData, savePrevData, showToast}){
   const [verHist, setVerHist] = useState(false);
   const [newTarea, setNewTarea] = useState("");
-
   const tareas   = prevData?.tareas   || [];
   const meses    = prevData?.meses    || {};
   const historial= prevData?.historial|| [];
   const celdas   = meses[CURRENT_MONTH] || {};
-
   const allDeptos = [];
-  Object.entries(edificios).forEach(([ed, ds]) =>
-    ds.forEach(dep => allDeptos.push({ed, dep}))
-  );
-
+  Object.entries(edificios).forEach(([ed, ds]) => ds.forEach(dep => allDeptos.push({ed, dep})));
   const celKey = (ed, dep, tarea) => `${ed}|${dep}|${tarea}`;
-
   function ultimaVezRealizada(ed, dep, tarea) {
-    const mesesAnteriores = Object.entries(meses)
-      .filter(([m]) => m !== CURRENT_MONTH)
-      .sort(([a],[b]) => b.localeCompare(a));
+    const mesesAnteriores = Object.entries(meses).filter(([m]) => m !== CURRENT_MONTH).sort(([a],[b]) => b.localeCompare(a));
     const k = celKey(ed, dep, tarea);
-    for (const [, cels] of mesesAnteriores) {
-      if (cels[k]?.done && cels[k]?.fecha) return cels[k].fecha;
-    }
+    for (const [, cels] of mesesAnteriores) { if (cels[k]?.done && cels[k]?.fecha) return cels[k].fecha; }
     const hist = [...historial].sort((a,b) => b.mes.localeCompare(a.mes));
-    for (const h of hist) {
-      if (h.celdas?.[k]?.done && h.celdas[k]?.fecha) return h.celdas[k].fecha;
-    }
+    for (const h of hist) { if (h.celdas?.[k]?.done && h.celdas[k]?.fecha) return h.celdas[k].fecha; }
     return null;
   }
-
   async function toggleCelda(ed, dep, tarea) {
     const k = celKey(ed, dep, tarea);
     const prev = {...meses};
     if (!prev[CURRENT_MONTH]) prev[CURRENT_MONTH] = {};
-    if (prev[CURRENT_MONTH][k]?.done) {
-      delete prev[CURRENT_MONTH][k];
-      await savePrevData({...prevData, meses: prev});
-      return;
-    }
+    if (prev[CURRENT_MONTH][k]?.done) { delete prev[CURRENT_MONTH][k]; await savePrevData({...prevData, meses: prev}); return; }
     const ultima = ultimaVezRealizada(ed, dep, tarea);
     if (ultima) {
       const diasDesde = Math.floor((new Date(TODAY) - new Date(ultima)) / 86400000);
-      if (diasDesde < 30) {
-        const ok = window.confirm(`⚠️ Esta tarea ya se realizó el ${FMT_DATE(ultima)} (hace ${diasDesde} días).\n\n¿Marcarla igual?`);
-        if (!ok) return;
-      }
+      if (diasDesde < 30) { const ok = window.confirm(`⚠️ Aviso: ya se realizó el ${FMT_DATE(ultima)} (hace ${diasDesde} días). ¿Marcar igual?`); if (!ok) return; }
     }
     prev[CURRENT_MONTH][k] = {done: true, fecha: TODAY};
     await savePrevData({...prevData, meses: prev});
   }
-
   async function addTarea() {
     const t = newTarea.trim();
     if (!t || tareas.includes(t)) return;
     await savePrevData({...prevData, tareas: [...tareas, t]});
     setNewTarea("");
   }
-
   async function removeTarea(t) {
     if (!window.confirm(`¿Eliminar la columna "${t}"?`)) return;
     const newMeses = {};
-    Object.entries(meses).forEach(([m, cels]) => {
-      newMeses[m] = {};
-      Object.entries(cels).forEach(([k, v]) => {
-        if (!k.endsWith(`|${t}`)) newMeses[m][k] = v;
-      });
-    });
+    Object.entries(meses).forEach(([m, cels]) => { newMeses[m] = {}; Object.entries(cels).forEach(([k, v]) => { if (!k.endsWith(`|${t}`)) newMeses[m][k] = v; }); });
     await savePrevData({...prevData, tareas: tareas.filter(x => x !== t), meses: newMeses});
   }
-
   async function cerrarMes() {
     const mesLabel = MONTHS[parseInt(CURRENT_MONTH.split("-")[1]) - 1] + " " + CURRENT_MONTH.split("-")[0];
-    if (!window.confirm(`¿Cerrar ${mesLabel} y archivarlo?`)) return;
-    const snapshot = {mes: CURRENT_MONTH, label: mesLabel, celdas: {...(meses[CURRENT_MONTH]||{})}, tareas: [...tareas], deptos: allDeptos.map(({ed,dep})=>({ed,dep}))};
-    const newMeses = {...meses};
-    delete newMeses[CURRENT_MONTH];
+    if (!window.confirm(`¿Cerrar ${mesLabel}?`)) return;
+    const snapshot = { mes: CURRENT_MONTH, label: mesLabel, celdas: {...(meses[CURRENT_MONTH] || {})}, tareas: [...tareas], deptos: allDeptos.map(({ed, dep}) => ({ed, dep})) };
+    const newMeses = {...meses}; delete newMeses[CURRENT_MONTH];
     await savePrevData({...prevData, historial: [...historial, snapshot], meses: newMeses});
     showToast("📋 Mes cerrado y archivado");
   }
-
   const total = allDeptos.length * tareas.length;
   const done  = Object.values(celdas).filter(v => v?.done).length;
   const pct   = total > 0 ? Math.round(done / total * 100) : 0;
@@ -617,29 +588,22 @@ function Preventivo({edificios, prevData, savePrevData, showToast}){
         const dn  = Object.values(h.celdas||{}).filter(v=>v?.done).length;
         const p   = tot > 0 ? Math.round(dn/tot*100) : 0;
         return (
-          <div key={i} style={{...S.card,marginBottom:"0.75rem"}}>
+          <div key={i} style={{...S.card, marginBottom:"0.75rem"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"0.75rem"}}>
               <p style={{margin:0,fontWeight:600,fontSize:15}}>{h.label}</p>
               <span style={S.tag(p===100?"#EAF3DE":"#E6F1FB",p===100?"#3B6D11":"#185FA5",p===100?"#97C459":"#85B7EB")}>{p}% · {dn}/{tot}</span>
             </div>
             <div style={{overflowX:"auto"}}>
               <table style={{borderCollapse:"collapse",fontSize:11,minWidth:400}}>
-                <thead>
-                  <tr>
-                    <th style={{padding:"5px 10px",background:"#f7f6f2",border:"1px solid #e2e0d8",textAlign:"left",fontWeight:600,color:"#555",minWidth:110,position:"sticky",left:0,zIndex:1}}>Departamento</th>
-                    {(h.tareas||[]).map(t=><th key={t} style={{padding:"5px 10px",background:"#f7f6f2",border:"1px solid #e2e0d8",fontWeight:600,color:"#555",textAlign:"center",minWidth:90}}>{t}</th>)}
-                  </tr>
-                </thead>
+                <thead><tr>
+                  <th style={{padding:"5px 10px",background:"#f7f6f2",border:"1px solid #e2e0d8",textAlign:"left",fontWeight:600,color:"#555",minWidth:110,position:"sticky",left:0,zIndex:1}}>Departamento</th>
+                  {(h.tareas||[]).map(t=>(<th key={t} style={{padding:"5px 10px",background:"#f7f6f2",border:"1px solid #e2e0d8",fontWeight:600,color:"#555",textAlign:"center",minWidth:90}}>{t}</th>))}
+                </tr></thead>
                 <tbody>
                   {(h.deptos||[]).map(({ed,dep},ri)=>(
                     <tr key={ri} style={{background:ri%2===0?"#fff":"#fafaf8"}}>
                       <td style={{padding:"5px 10px",border:"1px solid #e2e0d8",fontWeight:500,color:"#444",position:"sticky",left:0,background:ri%2===0?"#fff":"#fafaf8",zIndex:1}}>{ed} · {dep}</td>
-                      {(h.tareas||[]).map(t=>{
-                        const v = h.celdas?.[`${ed}|${dep}|${t}`];
-                        return <td key={t} style={{padding:"5px 10px",border:"1px solid #e2e0d8",textAlign:"center",background:v?.done?"#EAF3DE":"#fff"}}>
-                          {v?.done?<span style={{color:"#3B6D11",fontSize:11}}>✓ {FMT_DATE(v.fecha)}</span>:<span style={{color:"#ddd",fontSize:14}}>—</span>}
-                        </td>;
-                      })}
+                      {(h.tareas||[]).map(t=>{ const v = h.celdas?.[`${ed}|${dep}|${t}`]; return (<td key={t} style={{padding:"5px 10px",border:"1px solid #e2e0d8",textAlign:"center",background:v?.done?"#EAF3DE":"#fff"}}>{v?.done?<span style={{color:"#3B6D11",fontSize:11}}>✓ {FMT_DATE(v.fecha)}</span>:<span style={{color:"#ddd",fontSize:14}}>—</span>}</td>); })}
                     </tr>
                   ))}
                 </tbody>
@@ -675,35 +639,23 @@ function Preventivo({edificios, prevData, savePrevData, showToast}){
       <div style={{...S.section,padding:"1rem 1.25rem",marginBottom:"1.25rem"}}>
         <p style={{margin:"0 0 0.75rem",fontWeight:500,fontSize:14}}>➕ Agregar tarea al preventivo</p>
         <div style={{display:"flex",gap:"0.5rem"}}>
-          <input style={{...S.input,flex:1}} placeholder="Ej: Revisión matafuegos, Limpieza filtros AC..." value={newTarea}
-            onChange={e=>setNewTarea(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addTarea();}}/>
+          <input style={{...S.input,flex:1}} placeholder="Ej: Revisión matafuegos..." value={newTarea} onChange={e=>setNewTarea(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addTarea();}}/>
           <button onClick={addTarea} style={{...S.btn("#185FA5","#fff"),whiteSpace:"nowrap"}}>+ Agregar</button>
         </div>
         {tareas.length > 0 && (
           <div style={{marginTop:"0.75rem",display:"flex",flexWrap:"wrap",gap:6}}>
-            {tareas.map(t=>(
-              <span key={t} style={{...S.tag("#E6F1FB","#185FA5","#85B7EB"),display:"flex",alignItems:"center",gap:4}}>
-                {t}<button onClick={()=>removeTarea(t)} style={{background:"none",border:"none",cursor:"pointer",color:"#A32D2D",fontSize:13,padding:0,lineHeight:1}}>✕</button>
-              </span>
-            ))}
+            {tareas.map(t=>(<span key={t} style={{...S.tag("#E6F1FB","#185FA5","#85B7EB"),display:"flex",alignItems:"center",gap:4}}>{t}<button onClick={()=>removeTarea(t)} style={{background:"none",border:"none",cursor:"pointer",color:"#A32D2D",fontSize:13,padding:0,lineHeight:1}}>✕</button></span>))}
           </div>
         )}
       </div>
-      {tareas.length === 0 && (
-        <div style={{textAlign:"center",padding:"3rem 0",color:"#aaa"}}>
-          <p style={{fontSize:32,marginBottom:8}}>📋</p>
-          <p style={{fontSize:15}}>Agregá tareas arriba para armar la tabla preventiva.</p>
-        </div>
-      )}
+      {tareas.length === 0 && (<div style={{textAlign:"center",padding:"3rem 0",color:"#aaa"}}><p style={{fontSize:32,marginBottom:8}}>📋</p><p style={{fontSize:15}}>Agregá tareas arriba para armar la tabla preventiva.</p></div>)}
       {tareas.length > 0 && (
         <div style={{overflowX:"auto"}}>
           <table style={{borderCollapse:"collapse",fontSize:13,width:"100%",minWidth:400+tareas.length*110}}>
-            <thead>
-              <tr>
-                <th style={{padding:"8px 12px",background:"#1C2B45",border:"1px solid #2E4A6E",textAlign:"left",fontWeight:600,color:"#8BAFD4",minWidth:130,position:"sticky",left:0,zIndex:2}}>Departamento</th>
-                {tareas.map(t=><th key={t} style={{padding:"8px 12px",background:"#1C2B45",border:"1px solid #2E4A6E",fontWeight:600,color:"#fff",textAlign:"center",minWidth:110}}>{t}</th>)}
-              </tr>
-            </thead>
+            <thead><tr>
+              <th style={{padding:"8px 12px",background:"#1C2B45",border:"1px solid #2E4A6E",textAlign:"left",fontWeight:600,color:"#8BAFD4",minWidth:130,position:"sticky",left:0,zIndex:2}}>Departamento</th>
+              {tareas.map(t=>(<th key={t} style={{padding:"8px 12px",background:"#1C2B45",border:"1px solid #2E4A6E",fontWeight:600,color:"#fff",textAlign:"center",minWidth:110}}>{t}</th>))}
+            </tr></thead>
             <tbody>
               {allDeptos.map(({ed, dep}, ri) => (
                 <tr key={`${ed}-${dep}`} style={{background:ri%2===0?"#fff":"#fafaf8"}}>
@@ -711,16 +663,13 @@ function Preventivo({edificios, prevData, savePrevData, showToast}){
                     <span style={{fontSize:11,color:"#aaa",fontWeight:400}}>{ed} · </span>{dep}
                   </td>
                   {tareas.map(tarea => {
-                    const k=celKey(ed,dep,tarea), val=celdas[k], done=val?.done;
+                    const k = celKey(ed, dep, tarea);
+                    const val = celdas[k];
+                    const isDone = val?.done;
                     return (
-                      <td key={tarea} style={{padding:"6px 8px",border:"1px solid #e2e0d8",textAlign:"center",background:done?"#EAF3DE":"#fff",cursor:"pointer",transition:"background 0.15s"}}
-                        onClick={()=>toggleCelda(ed,dep,tarea)}
-                        title={done?`Realizado el ${FMT_DATE(val.fecha)} — clic para desmarcar`:"Clic para marcar como realizado"}>
-                        {done ? (
-                          <div><div style={{color:"#3B6D11",fontWeight:700,fontSize:15}}>✓</div><div style={{fontSize:10,color:"#5a9a3a"}}>{FMT_DATE(val.fecha)}</div></div>
-                        ) : (
-                          <div style={{width:20,height:20,border:"2px solid #dddbd3",borderRadius:4,margin:"0 auto",background:"#f7f6f2"}}/>
-                        )}
+                      <td key={tarea} style={{padding:"6px 8px",border:"1px solid #e2e0d8",textAlign:"center",background:isDone?"#EAF3DE":"#fff",cursor:"pointer",transition:"background 0.15s"}}
+                        onClick={()=>toggleCelda(ed, dep, tarea)} title={isDone?`Realizado el ${FMT_DATE(val.fecha)}`:"Clic para marcar"}>
+                        {isDone?(<div><div style={{color:"#3B6D11",fontWeight:700,fontSize:15}}>✓</div><div style={{fontSize:10,color:"#5a9a3a"}}>{FMT_DATE(val.fecha)}</div></div>):(<div style={{width:20,height:20,border:"2px solid #dddbd3",borderRadius:4,margin:"0 auto",background:"#f7f6f2"}}/>)}
                       </td>
                     );
                   })}
@@ -734,219 +683,27 @@ function Preventivo({edificios, prevData, savePrevData, showToast}){
   );
 }
 
-// ── Empleados ─────────────────────────────────────────────────────────────────
-function Empleados({empleadosData, saveEmpleadosData, showToast}){
-  const [mesOffset, setMesOffset] = useState(0);
-  const [showNuevo, setShowNuevo] = useState(false);
-  const [nuevoNombre, setNuevoNombre] = useState("");
-  const [nuevoHorasMes, setNuevoHorasMes] = useState(160);
-  const [editEmpleado, setEditEmpleado] = useState(null);
-  const [registroModal, setRegistroModal] = useState(null);
-  const [regFecha, setRegFecha] = useState(TODAY);
-  const [regHoras, setRegHoras] = useState("");
-  const [regNota, setRegNota] = useState("");
-
-  const empleados = empleadosData?.empleados || [];
-  const registros = empleadosData?.registros || {}; // { empId: [{fecha,horas,nota}] }
-
-  // Mes a mostrar
-  const baseDate = new Date(TODAY+"T12:00:00");
-  baseDate.setMonth(baseDate.getMonth()+mesOffset);
-  const mesStr = baseDate.toISOString().slice(0,7); // YYYY-MM
-  const mesLabel = MONTHS[baseDate.getMonth()]+" "+baseDate.getFullYear();
-
-  async function agregarEmpleado(){
-    if(!nuevoNombre.trim()) return;
-    const nuevo={id:Date.now(),nombre:nuevoNombre.trim(),horasMes:Number(nuevoHorasMes)||160};
-    await saveEmpleadosData({...empleadosData,empleados:[...empleados,nuevo]});
-    setNuevoNombre(""); setNuevoHorasMes(160); setShowNuevo(false);
-  }
-
-  async function eliminarEmpleado(id){
-    if(!window.confirm("¿Eliminar empleado?")) return;
-    const newRegs={...registros}; delete newRegs[id];
-    await saveEmpleadosData({...empleadosData,empleados:empleados.filter(e=>e.id!==id),registros:newRegs});
-  }
-
-  async function editarEmpleado(emp){
-    const lista=empleados.map(e=>e.id===emp.id?emp:e);
-    await saveEmpleadosData({...empleadosData,empleados:lista});
-    setEditEmpleado(null); showToast("✅ Empleado actualizado");
-  }
-
-  async function agregarRegistro(){
-    if(!regFecha||!regHoras) return;
-    const id=registroModal.id;
-    const prevRegs=registros[id]||[];
-    const nuevo={id:Date.now(),fecha:regFecha,horas:Number(regHoras),nota:regNota.trim()};
-    const newRegs={...registros,[id]:[...prevRegs,nuevo]};
-    await saveEmpleadosData({...empleadosData,registros:newRegs});
-    setRegFecha(TODAY); setRegHoras(""); setRegNota(""); showToast("✅ Registro guardado");
-  }
-
-  async function eliminarRegistro(empId, regId){
-    const newList=(registros[empId]||[]).filter(r=>r.id!==regId);
-    await saveEmpleadosData({...empleadosData,registros:{...registros,[empId]:newList}});
-  }
-
-  function horasEnMes(empId){
-    return (registros[empId]||[])
-      .filter(r=>r.fecha&&r.fecha.startsWith(mesStr))
-      .reduce((acc,r)=>acc+(r.horas||0),0);
-  }
-
-  return(
-    <div>
-      {/* Modal editar empleado */}
-      {editEmpleado&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(10,10,20,0.6)",zIndex:3000,display:"flex",alignItems:"center",justifyContent:"center"}}>
-          <div style={{background:"#fff",borderRadius:16,padding:"1.5rem",width:340,boxShadow:"0 12px 48px rgba(0,0,0,0.25)"}}>
-            <p style={{margin:"0 0 1rem",fontWeight:600,fontSize:16}}>✏️ Editar empleado</p>
-            <label style={S.label}>Nombre</label>
-            <input style={{...S.input,marginBottom:"0.75rem"}} value={editEmpleado.nombre} onChange={e=>setEditEmpleado(p=>({...p,nombre:e.target.value}))}/>
-            <label style={S.label}>Horas libres mensuales</label>
-            <input type="number" style={{...S.input,marginBottom:"1rem"}} value={editEmpleado.horasMes} onChange={e=>setEditEmpleado(p=>({...p,horasMes:Number(e.target.value)}))}/>
-            <div style={{display:"flex",gap:"0.5rem",justifyContent:"flex-end"}}>
-              <button onClick={()=>setEditEmpleado(null)} style={S.btn()}>Cancelar</button>
-              <button onClick={()=>editarEmpleado(editEmpleado)} style={{...S.btn("#185FA5","#fff")}}>Guardar</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal registrar horas */}
-      {registroModal&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(10,10,20,0.6)",zIndex:3000,display:"flex",alignItems:"center",justifyContent:"center"}}>
-          <div style={{background:"#fff",borderRadius:16,padding:"1.5rem",width:400,maxHeight:"85vh",overflowY:"auto",boxShadow:"0 12px 48px rgba(0,0,0,0.25)"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem"}}>
-              <p style={{margin:0,fontWeight:600,fontSize:16}}>⏱️ Registros — {registroModal.nombre}</p>
-              <button onClick={()=>setRegistroModal(null)} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#888"}}>✕</button>
-            </div>
-            <div style={{...S.section,padding:"1rem",marginBottom:"1rem"}}>
-              <p style={{margin:"0 0 0.75rem",fontWeight:500,fontSize:14}}>+ Agregar registro</p>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0.5rem",marginBottom:"0.5rem"}}>
-                <div><label style={S.label}>Fecha</label><input type="date" style={S.input} value={regFecha} onChange={e=>setRegFecha(e.target.value)}/></div>
-                <div><label style={S.label}>Horas trabajadas</label><input type="number" min={0.5} step={0.5} style={S.input} value={regHoras} onChange={e=>setRegHoras(e.target.value)} placeholder="Ej: 4"/></div>
-              </div>
-              <label style={S.label}>Nota (opcional)</label>
-              <input style={{...S.input,marginBottom:"0.75rem"}} value={regNota} onChange={e=>setRegNota(e.target.value)} placeholder="Tarea realizada..."/>
-              <button onClick={agregarRegistro} style={{...S.btn("#185FA5","#fff"),width:"100%",justifyContent:"center"}}>+ Guardar registro</button>
-            </div>
-            {/* Lista de registros del mes */}
-            <p style={{margin:"0 0 0.5rem",fontSize:13,fontWeight:600,color:"#555"}}>{mesLabel}</p>
-            {(registros[registroModal.id]||[]).filter(r=>r.fecha?.startsWith(mesStr)).length===0
-              ?<p style={{fontSize:13,color:"#aaa"}}>Sin registros este mes.</p>
-              :[...(registros[registroModal.id]||[])].filter(r=>r.fecha?.startsWith(mesStr)).sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(r=>(
-                <div key={r.id} style={{...S.card,padding:"0.6rem 0.875rem",marginBottom:"0.4rem",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div>
-                    <span style={{fontSize:13,fontWeight:600,color:"#185FA5"}}>{r.horas}h</span>
-                    <span style={{fontSize:13,color:"#888",marginLeft:8}}>{FMT_DATE(r.fecha)}</span>
-                    {r.nota&&<p style={{margin:"2px 0 0",fontSize:12,color:"#aaa"}}>{r.nota}</p>}
-                  </div>
-                  <button onClick={()=>eliminarRegistro(registroModal.id,r.id)} style={{...S.btn("#FCEBEB","#A32D2D"),padding:"3px 8px",fontSize:11,border:"1px solid #F09595"}}>🗑️</button>
-                </div>
-              ))
-            }
-          </div>
-        </div>
-      )}
-
-      {/* Header */}
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:"0.75rem",marginBottom:"1.25rem"}}>
-        <div>
-          <p style={{margin:0,fontWeight:700,fontSize:18}}>👥 Empleados</p>
-          <p style={{margin:"2px 0 0",fontSize:13,color:"#888"}}>Control de horas libres mensuales</p>
-        </div>
-        <div style={{display:"flex",gap:"0.5rem",alignItems:"center"}}>
-          <button onClick={()=>setMesOffset(o=>o-1)} style={S.btn()}>◀</button>
-          <span style={{fontSize:14,fontWeight:500,minWidth:120,textAlign:"center"}}>{mesLabel}</span>
-          <button onClick={()=>setMesOffset(o=>o+1)} style={S.btn()}>▶</button>
-          <button onClick={()=>setShowNuevo(v=>!v)} style={{...S.btn("#185FA5","#fff"),marginLeft:8}}>+ Empleado</button>
-        </div>
-      </div>
-
-      {/* Formulario nuevo empleado */}
-      {showNuevo&&(
-        <div style={{...S.section,marginBottom:"1.25rem"}}>
-          <p style={{margin:"0 0 0.75rem",fontWeight:500,fontSize:15}}>➕ Nuevo empleado</p>
-          <div style={{display:"grid",gridTemplateColumns:"2fr 1fr auto",gap:"0.75rem",alignItems:"end"}}>
-            <div><label style={S.label}>Nombre</label><input style={S.input} value={nuevoNombre} onChange={e=>setNuevoNombre(e.target.value)} placeholder="Nombre completo"/></div>
-            <div><label style={S.label}>Horas libres / mes</label><input type="number" style={S.input} value={nuevoHorasMes} onChange={e=>setNuevoHorasMes(e.target.value)} min={1}/></div>
-            <button onClick={agregarEmpleado} style={{...S.btn("#3B6D11","#fff"),whiteSpace:"nowrap"}}>+ Agregar</button>
-          </div>
-        </div>
-      )}
-
-      {/* Grilla empleados */}
-      {empleados.length===0&&(
-        <div style={{textAlign:"center",padding:"3rem 0",color:"#aaa"}}>
-          <p style={{fontSize:36}}>👤</p>
-          <p style={{fontSize:15}}>Aún no hay empleados. Agregá el primero arriba.</p>
-        </div>
-      )}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:"1rem"}}>
-        {empleados.map(emp=>{
-          const horas=horasEnMes(emp.id);
-          const libre=Math.max(0,emp.horasMes-horas);
-          const pct=emp.horasMes>0?Math.min(100,Math.round(horas/emp.horasMes*100)):0;
-          const color=pct>=90?"#A32D2D":pct>=70?"#854F0B":"#185FA5";
-          const bgBar=pct>=90?"#F09595":pct>=70?"#EF9F27":"#85B7EB";
-          return(
-            <div key={emp.id} style={{...S.card,border:"1px solid #e2e0d8",borderRadius:14,padding:"1rem 1.25rem"}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"0.75rem"}}>
-                <div>
-                  <p style={{margin:0,fontWeight:700,fontSize:16}}>{emp.nombre}</p>
-                  <p style={{margin:"2px 0 0",fontSize:12,color:"#888"}}>{emp.horasMes}h libres/mes</p>
-                </div>
-                <div style={{display:"flex",gap:4}}>
-                  <button onClick={()=>setEditEmpleado({...emp})} style={{...S.btn(),padding:"4px 8px",fontSize:12}}>✏️</button>
-                  <button onClick={()=>eliminarEmpleado(emp.id)} style={{...S.btn("#FCEBEB","#A32D2D"),padding:"4px 8px",fontSize:12,border:"1px solid #F09595"}}>🗑️</button>
-                </div>
-              </div>
-              {/* Barra de horas */}
-              <div style={{marginBottom:"0.5rem"}}>
-                <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                  <span style={{fontSize:12,color:"#555"}}>Trabajadas: <strong style={{color}}>{horas}h</strong></span>
-                  <span style={{fontSize:12,color:"#888"}}>Libres: {libre}h</span>
-                </div>
-                <div style={{background:"#e2e0d8",borderRadius:99,height:8,overflow:"hidden"}}>
-                  <div style={{width:`${pct}%`,height:"100%",background:bgBar,borderRadius:99,transition:"width 0.4s"}}/>
-                </div>
-                <p style={{margin:"3px 0 0",fontSize:11,color:color,fontWeight:pct>=90?700:400}}>
-                  {pct}% utilizado
-                  {pct>=90?" — ⚠️ Cerca del límite":""}
-                </p>
-              </div>
-              <button onClick={()=>{setRegistroModal(emp);setRegFecha(TODAY);setRegHoras("");setRegNota("");}}
-                style={{...S.btn("#E6F1FB","#185FA5"),width:"100%",justifyContent:"center",fontSize:13,padding:"7px 0",border:"1px solid #85B7EB"}}>
-                ⏱️ Ver registros / Cargar horas
-              </button>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 // ── App Principal ─────────────────────────────────────────────────────────────
 export default function App(){
   const [tab,setTab]=useState("dashboard");
   const [tareas,setTareasState]=useState([]);
   const [edificios,setEdificiosState]=useState(EDIFICIOS_INIT);
   const [tipos,setTiposState]=useState(TIPOS_INIT);
+  const [personal,setPersonalState]=useState(PERSONAL_INIT);
   const [prevData,setPrevDataState]=useState({tareas:[],meses:{},historial:[]});
-  const [empleadosData,setEmpleadosDataState]=useState({empleados:[],registros:{}});
   const [showForm,setShowForm]=useState(false);
   const [editando,setEditando]=useState(null);
-  const [filtro,setFiltro]=useState({edificio:"",urgencia:"",estado:"",tipo:"",asignado:""});
+  const [filtro,setFiltro]=useState({edificio:"",depto:"",urgencia:"",estado:"",tipo:"",asignado:""});
+  const [filtroHist,setFiltroHist]=useState({edificio:"",depto:""});
   const [newEdificio,setNewEdificio]=useState("");
   const [newDepto,setNewDepto]=useState({ed:"QDB",nombre:""});
   const [newTipo,setNewTipo]=useState("");
+  const [newPersonal,setNewPersonal]=useState("");
   const [loading,setLoading]=useState(true);
   const [toast,setToast]=useState(null);
   const [procesadosIds,setProcesadosIds]=useState(new Set());
   const [deptoModal,setDeptoModal]=useState(null);
+  const [iniciarModal,setIniciarModal]=useState(null); // tarea a iniciar
 
   const nextId=useRef(Date.now());
   const unsubs=useRef([]);
@@ -954,32 +711,35 @@ export default function App(){
 
   const showToast=(msg,tipo="ok")=>{setToast({msg,tipo});setTimeout(()=>setToast(null),4000);};
 
-  const saveTareas=useCallback(async v=>{setTareasState(v);try{await aSet("alma_tasks",v);}catch(e){console.error(e);};},[]);
+  const saveTareas=useCallback(async v=>{
+    const dedup=deduplicar(v);
+    setTareasState(dedup);
+    try{await aSet("alma_tasks",dedup);}catch(e){console.error(e);}
+  },[]);
   const saveEdificios=useCallback(async v=>{setEdificiosState(v);try{await aSet("alma_edificios",v);}catch(e){console.error(e);};},[]);
   const saveTipos=useCallback(async v=>{setTiposState(v);try{await aSet("alma_tipos",v);}catch(e){console.error(e);};},[]);
+  const savePersonal=useCallback(async v=>{setPersonalState(v);try{await aSet("alma_personal",v);}catch(e){console.error(e);};},[]);
   const savePrevData=useCallback(async v=>{setPrevDataState(v);try{await aSet("alma_preventivo",v);}catch(e){console.error(e);};},[]);
-  const saveEmpleadosData=useCallback(async v=>{setEmpleadosDataState(v);try{await aSet("alma_empleados",v);}catch(e){console.error(e);};},[]);
 
   useEffect(()=>{
     let mounted=true;
     (async()=>{
       try{
         await loadFirebase();
-        const [t,e,ti,pv,proc,emp]=await Promise.all([
+        const [t,e,ti,pv,proc,pers]=await Promise.all([
           aGet("alma_tasks"),aGet("alma_edificios"),aGet("alma_tipos"),
-          aGet("alma_preventivo"),aGet("alma_procesados"),aGet("alma_empleados"),
+          aGet("alma_preventivo"),aGet("alma_procesados"),aGet("alma_personal"),
         ]);
         if(!mounted) return;
-        if(t) setTareasState(t);
+        if(t) setTareasState(deduplicar(t));
         if(e) setEdificiosState(e);
         if(ti) setTiposState(ti);
         if(pv) setPrevDataState(pv);
         if(proc){procesadosRef.current=new Set(proc);setProcesadosIds(new Set(proc));}
-        if(emp) setEmpleadosDataState(emp);
-        const u1=aListen("alma_tasks",d=>{if(mounted&&d)setTareasState(d);});
+        if(pers) setPersonalState(pers);
+        const u1=aListen("alma_tasks",d=>{if(mounted&&d)setTareasState(deduplicar(d));});
         const u2=aListen("alma_preventivo",d=>{if(mounted&&d)setPrevDataState(d);});
-        const u3=aListen("alma_empleados",d=>{if(mounted&&d)setEmpleadosDataState(d);});
-        unsubs.current.push(u1,u2,u3);
+        unsubs.current.push(u1,u2);
         setLoading(false);
         checkReportes();
         const iv=setInterval(checkReportes,60000);
@@ -990,20 +750,14 @@ export default function App(){
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
-  // FIX checkReportes: usa lGet con col y key correctos, y maneja arrays dentro de documentos
   const checkReportes=useCallback(async()=>{
     try{
-      // Intentar con ambas estructuras posibles del DB de limpieza
-      let reps=null;
-      try{ reps=await lGet("limpiezas","lim_reports"); }catch(e){}
-      if(!reps||!Array.isArray(reps)){
-        try{ reps=await lGet("lim_reports","data"); }catch(e){}
-      }
+      const reps=await lGet("lim_reports");
       if(!reps||!Array.isArray(reps)) return;
-
       const nuevos=reps.filter(r=>r.comentario?.trim()&&!procesadosRef.current.has(String(r.id)));
       if(!nuevos.length) return;
       let tareasAct=await aGet("alma_tasks")||[];
+      tareasAct=deduplicar(tareasAct);
       for(const rep of nuevos){
         if(procesadosRef.current.has(String(rep.id))) continue;
         procesadosRef.current.add(String(rep.id));
@@ -1011,14 +765,17 @@ export default function App(){
         setProcesadosIds(new Set(procesadosRef.current));
         const res=clasificarReporte(rep.comentario);
         if(!res.esMantenimiento) continue;
+        // Evitar duplicados: mismo reporteId O mismo título+edificio+depto
         if(tareasAct.some(t=>t.reporteId===rep.id)) continue;
         let ed="",dep="";
         const m=(rep.depto||"").trim().match(/^(QDB|H475|qdb|h475)\s*(.+)$/i);
         if(m){ed=m[1].toUpperCase();dep=m[2].trim();}else{ed="H475";dep=(rep.depto||"").trim();}
+        const titulo=capitalizar(rep.comentario.slice(0,60));
+        // Verificar duplicado por título+edificio+depto
+        if(tareasAct.some(t=>t.titulo===titulo&&t.edificio===ed&&t.depto===dep)) continue;
         const nt={
           id:Date.now()+Math.random(),
-          titulo:capitalizar(rep.comentario.slice(0,60)),
-          edificio:ed,depto:dep,tipo:res.tipo||"General",
+          titulo,edificio:ed,depto:dep,tipo:res.tipo||"General",
           asignado:"Yo",urgencia:res.urgencia||"Media",estado:"Pendiente",
           fechaCarga:rep.fecha||TODAY,fecha:rep.fecha||TODAY,fechaFin:"",
           descripcion:`Reportado por: ${rep.asignado||"Personal"}`,
@@ -1030,16 +787,17 @@ export default function App(){
         tareasAct=[...tareasAct,nt];
         showToast(`🔗 Nueva tarea: ${nt.titulo}`);
       }
-      await aSet("alma_tasks",tareasAct);
-      setTareasState(tareasAct);
-    }catch(e){console.error("checkReportes error:",e);}
+      const final=deduplicar(tareasAct);
+      await aSet("alma_tasks",final);
+      setTareasState(final);
+    }catch(e){console.error(e);}
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
   const enviarLimpieza=useCallback(async tarea=>{
     if(!tarea.limpieza||!tarea.fechaFin) return;
     try{
-      const lt=await lGet("limpiezas","lim_tasks")||[];
+      const lt=await lGet("lim_tasks")||[];
       if(lt.some(t=>t._almaId===tarea.id)) return;
       const n={id:Date.now(),_almaId:tarea.id,depto:`${tarea.edificio} ${tarea.depto}`,fecha:tarea.fechaFin,tipo:"Otro",descripcion:`🔧 Post-mantenimiento: ${tarea.titulo}`,comentario:"Limpieza tras mantenimiento",asignado:"",completado:false,ingresos:[],minutosOtro:null,libre:false};
       const {doc,setDoc}=window._fb;
@@ -1050,8 +808,8 @@ export default function App(){
   },[]);
 
   const saveTarea=useCallback(async f=>{
-    let lista;
     const hoy=new Date().toLocaleDateString("es-AR");
+    let lista;
     if(editando){
       lista=tareas.map(t=>{
         if(t.id!==editando.id) return t;
@@ -1059,22 +817,35 @@ export default function App(){
         return {...f,id:t.id,origen:t.origen,fotoReporte:t.fotoReporte,reporteId:t.reporteId,fechaCarga:t.fechaCarga||TODAY,historial:h};
       });
     }else{
+      // Verificar duplicado por título+edificio+depto antes de agregar
+      const isDup=tareas.some(t=>t.titulo.trim()===f.titulo.trim()&&t.edificio===f.edificio&&t.depto===f.depto&&t.estado!=="Completada");
+      if(isDup){showToast("⚠️ Ya existe una tarea igual (mismo título, edificio y dpto)","err");return;}
       const nt={...f,id:nextId.current++,fechaCarga:TODAY,historial:[`Creada el ${hoy}`]};
       lista=[...tareas,nt];
     }
     await saveTareas(lista);setEditando(null);
-  },[editando,tareas,saveTareas]);
+  },[editando,tareas,saveTareas,showToast]);
 
-  const cambiarEstado=useCallback(async(id,nuevoEstado)=>{
+  const cambiarEstado=useCallback(async(id,nuevoEstado,fechaInicio)=>{
     const lista=tareas.map(t=>{
       if(t.id!==id) return t;
       const h=[...(t.historial||[]),`${new Date().toLocaleDateString("es-AR")} — Estado: ${nuevoEstado}`];
       const upd={...t,estado:nuevoEstado,historial:h};
+      if(fechaInicio) upd.fecha=fechaInicio;
       if(nuevoEstado==="Completada"&&t.limpieza) enviarLimpieza(upd);
       return upd;
     });
     await saveTareas(lista);
   },[tareas,saveTareas,enviarLimpieza]);
+
+  // Iniciar tarea: abre modal para elegir fecha
+  const handleIniciar=useCallback((tarea)=>{
+    setIniciarModal(tarea);
+  },[]);
+
+  const confirmarIniciar=useCallback(async(tarea,fechaInicio)=>{
+    await cambiarEstado(tarea.id,"En curso",fechaInicio);
+  },[cambiarEstado]);
 
   const eliminarTarea=useCallback(async id=>await saveTareas(tareas.filter(t=>t.id!==id)),[tareas,saveTareas]);
 
@@ -1085,32 +856,59 @@ export default function App(){
   },[tareas,saveTareas]);
 
   const moverTarea=useCallback(async(id,fechaTrabajo)=>{
-    await saveTareas(tareas.map(t=>t.id===id?{...t,fechaTrabajo}:t));
+    // Al asignar un día, cambiar estado a "Asignada" si estaba Pendiente
+    const lista=tareas.map(t=>{
+      if(t.id!==id) return t;
+      const nuevoEstado=t.estado==="Pendiente"?"Asignada":t.estado;
+      const h=[...(t.historial||[]),`Asignada al ${FMT_DATE(fechaTrabajo)}`];
+      return {...t,fechaTrabajo,estado:nuevoEstado,historial:h};
+    });
+    await saveTareas(lista);
   },[tareas,saveTareas]);
 
   const quitarDiaTarea=useCallback(async id=>{
-    await saveTareas(tareas.map(t=>{
+    const lista=tareas.map(t=>{
       if(t.id!==id) return t;
-      const {fechaTrabajo:_,...rest}=t; return rest;
-    }));
+      const {fechaTrabajo:_,...rest}=t;
+      // Si estaba Asignada, volver a Pendiente
+      const nuevoEstado=t.estado==="Asignada"?"Pendiente":t.estado;
+      return {...rest,estado:nuevoEstado};
+    });
+    await saveTareas(lista);
   },[tareas,saveTareas]);
 
-  const tareasActivas=sortDesc(tareas.filter(t=>t.estado!=="Completada"));
-  const tareasComp   =sortDesc(tareas.filter(t=>t.estado==="Completada"));
+  const tareasActivas=sortDesc(deduplicar(tareas.filter(t=>t.estado!=="Completada")));
+  const tareasComp   =sortDesc(deduplicar(tareas.filter(t=>t.estado==="Completada")));
   const urgentes     =sortDesc(tareasActivas.filter(t=>t.urgencia==="Urgente"));
   const enCurso      =sortDesc(tareas.filter(t=>t.estado==="En curso"));
   const huesped      =sortDesc(tareas.filter(t=>t.huespedAlerta&&t.estado!=="Completada"));
-  const desdeLimpieza=sortDesc(tareas.filter(t=>t.origen==="reporte"&&t.estado!=="Completada"));
 
-  const tareasF=sortDesc(tareas.filter(t=>{
-    if(tab==="historial") return t.estado==="Completada";
+  // Filtro tareas activas
+  const tareasF=sortDesc(deduplicar(tareas.filter(t=>{
+    if(t.estado==="Completada") return false;
     if(filtro.edificio&&t.edificio!==filtro.edificio) return false;
+    if(filtro.depto&&t.depto!==filtro.depto) return false;
     if(filtro.urgencia&&t.urgencia!==filtro.urgencia) return false;
-    if(filtro.estado&&t.estado!==filtro.estado) return false;
     if(filtro.tipo&&t.tipo!==filtro.tipo) return false;
     if(filtro.asignado&&t.asignado!==filtro.asignado) return false;
-    return t.estado!=="Completada";
-  }));
+    if(filtro.estado){
+      if(filtro.estado==="Pendiente") return t.estado==="Pendiente"||(!t.estado);
+      return t.estado===filtro.estado;
+    }
+    return true;
+  })));
+
+  // Deptos del edificio filtrado (para filtro de tareas y historial)
+  const deptosParaFiltro = filtro.edificio ? (edificios[filtro.edificio]||[]) : [];
+  const deptosParaHistFiltro = filtroHist.edificio ? (edificios[filtroHist.edificio]||[]) : [];
+
+  // Filtro historial
+  const tareasHistF=sortDesc(deduplicar(tareas.filter(t=>{
+    if(t.estado!=="Completada") return false;
+    if(filtroHist.edificio&&t.edificio!==filtroHist.edificio) return false;
+    if(filtroHist.depto&&t.depto!==filtroHist.depto) return false;
+    return true;
+  })));
 
   const TABS=[
     {id:"dashboard",icon:"🏠",label:"Dashboard"},
@@ -1118,7 +916,6 @@ export default function App(){
     {id:"semanal",icon:"📆",label:"Organización"},
     {id:"preventivo",icon:"🔧",label:"Preventivo"},
     {id:"edificios",icon:"🏢",label:"Edificios"},
-    {id:"empleados",icon:"👥",label:"Empleados"},
     {id:"historial",icon:"📋",label:"Historial"},
     {id:"config",icon:"⚙️",label:"Config"},
   ];
@@ -1139,6 +936,7 @@ export default function App(){
 
       {toast&&<div style={{position:"fixed",top:14,right:14,zIndex:9999,background:toast.tipo==="err"?"#c0392b":"#185FA5",color:"#fff",borderRadius:10,padding:"10px 18px",fontSize:14,fontWeight:600,boxShadow:"0 4px 18px rgba(0,0,0,.2)",maxWidth:380}}>{toast.msg}</div>}
       {deptoModal&&<ModalDepto edificio={deptoModal.edificio} depto={deptoModal.depto} tareas={tareas} onClose={()=>setDeptoModal(null)}/>}
+      {iniciarModal&&<ModalIniciarFecha tarea={iniciarModal} onConfirm={fecha=>confirmarIniciar(iniciarModal,fecha)} onClose={()=>setIniciarModal(null)}/>}
 
       <div style={{background:"linear-gradient(135deg,#0C447C,#185FA5)",padding:"1.25rem 2rem",borderRadius:"0 0 20px 20px",marginBottom:"1.25rem"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:"1rem"}}>
@@ -1147,7 +945,11 @@ export default function App(){
             <p style={{margin:0,fontSize:13,color:"rgba(255,255,255,0.75)"}}>Alma Rentals · {new Date().toLocaleDateString("es-AR",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</p>
           </div>
           <div style={{display:"flex",gap:"1.5rem",textAlign:"center"}}>
-            {[{label:"Urgentes",val:urgentes.length,col:"#F09595"},{label:"En curso",val:enCurso.length,col:"#85B7EB"},{label:"De reportes",val:desdeLimpieza.length,col:"#FFB74D"}].map(c=>(
+            {[
+              {label:"Urgentes",val:urgentes.length,col:"#F09595"},
+              {label:"En curso",val:enCurso.length,col:"#85B7EB"},
+              {label:"Pendientes",val:tareas.filter(t=>t.estado==="Pendiente").length,col:"#FFB74D"}
+            ].map(c=>(
               <div key={c.label}><p style={{margin:0,fontSize:22,fontWeight:700,color:c.col}}>{c.val}</p><p style={{margin:0,fontSize:12,color:"rgba(255,255,255,0.75)"}}>{c.label}</p></div>
             ))}
           </div>
@@ -1167,6 +969,7 @@ export default function App(){
 
       <div style={{padding:"0 1rem"}}>
 
+        {/* ── DASHBOARD ── */}
         {tab==="dashboard"&&(
           <div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"1rem",marginBottom:"1.25rem"}}>
@@ -1189,7 +992,6 @@ export default function App(){
                   <div key={t.id} style={{padding:"8px 10px",background:"#fff",borderRadius:8,marginBottom:6,borderLeft:"4px solid #F09595"}}>
                     <p style={{margin:0,fontWeight:500,fontSize:14}}>{t.titulo}</p>
                     <p style={{margin:0,fontSize:12,color:"#888"}}>🏢 {t.edificio} · {t.depto} | 👤 {t.asignado}</p>
-                    <p style={{margin:"2px 0 0",fontSize:11,color:"#bbb"}}>Cargada: {FMT_DATE(t.fechaCarga||t.fecha)}</p>
                   </div>
                 ))}
               </div>
@@ -1199,7 +1001,6 @@ export default function App(){
                   <div key={t.id} style={{padding:"8px 10px",background:"#FAEEDA",borderRadius:8,marginBottom:6,borderLeft:"4px solid #EF9F27"}}>
                     <p style={{margin:0,fontWeight:500,fontSize:14}}>{t.titulo}</p>
                     <p style={{margin:0,fontSize:12,color:"#854F0B"}}>🏢 {t.edificio} · {t.depto}</p>
-                    <p style={{margin:"2px 0 0",fontSize:11,color:"#c08040"}}>Cargada: {FMT_DATE(t.fechaCarga||t.fecha)}</p>
                   </div>
                 ))}
               </div>
@@ -1209,7 +1010,6 @@ export default function App(){
                   <div key={t.id} style={{padding:"8px 10px",background:"#fff",borderRadius:8,marginBottom:6,borderLeft:"4px solid #85B7EB"}}>
                     <p style={{margin:0,fontWeight:500,fontSize:14}}>{t.titulo}</p>
                     <p style={{margin:0,fontSize:12,color:"#888"}}>👤 {t.asignado} · 📅 {FMT_DATE(t.fecha)}</p>
-                    <p style={{margin:"2px 0 0",fontSize:11,color:"#bbb"}}>Cargada: {FMT_DATE(t.fechaCarga||t.fecha)}</p>
                   </div>
                 ))}
               </div>
@@ -1218,87 +1018,90 @@ export default function App(){
                 {(()=>{
                   const fin=new Date();fin.setDate(fin.getDate()+7);
                   const finStr=fin.toISOString().slice(0,10);
-                  const ts=sortDesc(tareasActivas.filter(t=>(t.fechaTrabajo||t.fecha)>=TODAY&&(t.fechaTrabajo||t.fecha)<=finStr));
+                  const ts=sortDesc(tareasActivas.filter(t=>t.fecha>=TODAY&&t.fecha<=finStr));
                   if(!ts.length) return <p style={{color:"#888",fontSize:14}}>Sin tareas próximas.</p>;
                   return ts.map(t=>(
                     <div key={t.id} style={{padding:"8px 10px",background:t.origen==="reporte"?"#FFF3E0":"#fff",borderRadius:8,marginBottom:6,borderLeft:`4px solid ${t.origen==="reporte"?"#FFB74D":urgStyle(t.urgencia).border}`}}>
                       <p style={{margin:0,fontWeight:500,fontSize:14}}>{t.titulo}</p>
-                      <p style={{margin:0,fontSize:12,color:"#888"}}>🏢 {t.edificio} · 📅 {FMT_DATE(t.fechaTrabajo||t.fecha)}</p>
-                      {t.origen==="reporte"&&<span style={{fontSize:11,color:"#E65100"}}>🔗 Reporte</span>}
+                      <p style={{margin:0,fontSize:12,color:"#888"}}>🏢 {t.edificio} · {FMT_DATE(t.fecha)}</p>
                     </div>
                   ));
                 })()}
               </div>
-              {desdeLimpieza.length>0&&(
-                <div style={{...S.section,gridColumn:"1/-1",border:"1.5px solid #FFB74D",background:"#FFFBF5"}}>
-                  <p style={{margin:"0 0 0.75rem",fontWeight:600,fontSize:15,color:"#E65100"}}>🔗 Pendientes migrados de reportes ({desdeLimpieza.length})</p>
-                  {desdeLimpieza.map(t=>(
-                    <div key={t.id} style={{padding:"8px 10px",background:"#fff",borderRadius:8,marginBottom:6,borderLeft:"4px solid #FFB74D",display:"flex",gap:12,alignItems:"flex-start"}}>
-                      <div style={{flex:1}}>
-                        <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:6}}>
-                          <p style={{margin:0,fontWeight:500,fontSize:14}}>{t.titulo}</p>
-                          <span style={S.tag(urgStyle(t.urgencia).bg,urgStyle(t.urgencia).text,urgStyle(t.urgencia).border)}>{t.urgencia}</span>
-                        </div>
-                        <p style={{margin:"2px 0 0",fontSize:12,color:"#888"}}>🏢 {t.edificio} · {t.depto} | 🔧 {t.tipo} | 📅 {FMT_DATE(t.fecha)}</p>
-                        {t.fechaTrabajo&&<p style={{margin:"2px 0 0",fontSize:11,color:"#185FA5"}}>📆 Agendada: {FMT_DATE(t.fechaTrabajo)}</p>}
-                      </div>
-                      {(t.fotoReporte||t.foto)&&<img src={t.fotoReporte||t.foto} alt="foto" style={{width:56,height:56,objectFit:"cover",borderRadius:8,border:"1px solid #FFB74D",flexShrink:0,cursor:"zoom-in"}} onClick={()=>window.open(t.fotoReporte||t.foto,"_blank")}/>}
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           </div>
         )}
 
+        {/* ── TAREAS ── */}
         {tab==="tareas"&&(
           <div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem"}}>
               <p style={{margin:0,fontWeight:500,fontSize:16}}>Tareas activas ({tareasF.length})</p>
               <button onClick={()=>{setEditando(null);setShowForm(true);}} style={{...S.btn("#185FA5","#fff"),fontSize:15,padding:"9px 20px"}}>+ Nueva tarea</button>
             </div>
-            {/* Leyenda de colores */}
-            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:"0.75rem",alignItems:"center"}}>
-              <span style={{fontSize:12,color:"#888"}}>Color:</span>
-              <span style={{...S.tag("#FFFBF5","#E65100","#FFB74D"),fontSize:11}}>🔗 Desde reporte</span>
-              <span style={{...S.tag("#fff","#5F5E5A","#B4B2A9"),fontSize:11}}>Tarea manual</span>
-            </div>
             <div style={{...S.section,padding:"1rem 1.25rem",marginBottom:"1rem"}}>
               <p style={{margin:"0 0 0.75rem",fontSize:13,fontWeight:500,color:"#888"}}>FILTROS</p>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:"0.75rem"}}>
-                {[
-                  {key:"edificio",opts:["",...Object.keys(edificios)],ph:"Edificio"},
-                  {key:"urgencia",opts:["",...URGENCIAS.map(u=>u.label)],ph:"Urgencia"},
-                  {key:"estado",opts:["",...ESTADOS],ph:"Estado"},
-                  {key:"tipo",opts:["",...tipos],ph:"Tipo"},
-                  {key:"asignado",opts:["",...PERSONAL],ph:"Asignado"},
-                ].map(({key,opts,ph})=>(
-                  <select key={key} style={{...S.input,fontSize:13}} value={filtro[key]} onChange={e=>setFiltro(p=>({...p,[key]:e.target.value}))}>
-                    <option value="">{ph} (todos)</option>
-                    {opts.filter(Boolean).map(o=><option key={o}>{o}</option>)}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"0.75rem",marginBottom:"0.5rem"}}>
+                <div>
+                  <select style={{...S.input,fontSize:13}} value={filtro.edificio} onChange={e=>setFiltro(p=>({...p,edificio:e.target.value,depto:""}))}>
+                    <option value="">Edificio (todos)</option>
+                    {Object.keys(edificios).map(o=><option key={o}>{o}</option>)}
                   </select>
-                ))}
+                </div>
+                <div>
+                  <select style={{...S.input,fontSize:13}} value={filtro.depto} onChange={e=>setFiltro(p=>({...p,depto:e.target.value}))} disabled={!filtro.edificio}>
+                    <option value="">Dpto / Sector (todos)</option>
+                    {deptosParaFiltro.map(o=><option key={o}>{o}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <select style={{...S.input,fontSize:13}} value={filtro.estado} onChange={e=>setFiltro(p=>({...p,estado:e.target.value}))}>
+                    <option value="">Estado (todos)</option>
+                    {["Pendiente","Asignada","En curso","Pausada"].map(o=><option key={o}>{o}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <select style={{...S.input,fontSize:13}} value={filtro.urgencia} onChange={e=>setFiltro(p=>({...p,urgencia:e.target.value}))}>
+                    <option value="">Urgencia (todos)</option>
+                    {URGENCIAS.map(u=><option key={u.label}>{u.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <select style={{...S.input,fontSize:13}} value={filtro.tipo} onChange={e=>setFiltro(p=>({...p,tipo:e.target.value}))}>
+                    <option value="">Tipo (todos)</option>
+                    {tipos.map(o=><option key={o}>{o}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <select style={{...S.input,fontSize:13}} value={filtro.asignado} onChange={e=>setFiltro(p=>({...p,asignado:e.target.value}))}>
+                    <option value="">Asignado (todos)</option>
+                    {personal.map(o=><option key={o}>{o}</option>)}
+                  </select>
+                </div>
               </div>
             </div>
             {tareasF.length===0
               ?<p style={{textAlign:"center",color:"#888",marginTop:"2rem",fontSize:15}}>No hay tareas con esos filtros.</p>
-              :tareasF.map(t=><TareaCard key={t.id} t={t} onEdit={tt=>{setEditando(tt);setShowForm(true);}} onEstado={cambiarEstado} onDelete={eliminarTarea} onComentario={guardarComentario}/>)
+              :tareasF.map(t=><TareaCard key={t.id} t={t} onEdit={tt=>{setEditando(tt);setShowForm(true);}} onEstado={cambiarEstado} onDelete={eliminarTarea} onComentario={guardarComentario} onIniciar={handleIniciar}/>)
             }
           </div>
         )}
 
+        {/* ── ORGANIZACIÓN ── */}
         {tab==="semanal"&&(
           <div style={S.section}>
             <VistaSemanal tareas={tareasActivas} onMoverTarea={moverTarea} onEdit={tt=>{setEditando(tt);setShowForm(true);}} onQuitarDia={quitarDiaTarea}/>
           </div>
         )}
 
+        {/* ── PREVENTIVO ── */}
         {tab==="preventivo"&&(
           <div style={S.section}>
             <Preventivo edificios={edificios} prevData={prevData} savePrevData={savePrevData} showToast={showToast}/>
           </div>
         )}
 
+        {/* ── EDIFICIOS ── */}
         {tab==="edificios"&&(
           <div>
             {Object.keys(edificios).map(ed=>(
@@ -1331,22 +1134,34 @@ export default function App(){
           </div>
         )}
 
-        {tab==="empleados"&&(
-          <div style={S.section}>
-            <Empleados empleadosData={empleadosData} saveEmpleadosData={saveEmpleadosData} showToast={showToast}/>
-          </div>
-        )}
-
+        {/* ── HISTORIAL ── */}
         {tab==="historial"&&(
           <div>
-            <p style={{fontWeight:500,fontSize:16,marginBottom:"1rem"}}>Historial de tareas completadas ({tareasComp.length})</p>
-            {tareasComp.length===0
-              ?<p style={{textAlign:"center",color:"#888",fontSize:15,marginTop:"2rem"}}>Aún no hay completadas.</p>
-              :tareasComp.map(t=><TareaCard key={t.id} t={t} onEdit={tt=>{setEditando(tt);setShowForm(true);}} onEstado={cambiarEstado} onDelete={eliminarTarea} onComentario={guardarComentario}/>)
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem",flexWrap:"wrap",gap:"0.5rem"}}>
+              <p style={{margin:0,fontWeight:500,fontSize:16}}>Historial de tareas completadas ({tareasHistF.length})</p>
+            </div>
+            {/* Filtros de historial */}
+            <div style={{...S.section,padding:"1rem 1.25rem",marginBottom:"1rem"}}>
+              <p style={{margin:"0 0 0.75rem",fontSize:13,fontWeight:500,color:"#888"}}>FILTRAR HISTORIAL</p>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0.75rem"}}>
+                <select style={{...S.input,fontSize:13}} value={filtroHist.edificio} onChange={e=>setFiltroHist(p=>({...p,edificio:e.target.value,depto:""}))}>
+                  <option value="">Edificio (todos)</option>
+                  {Object.keys(edificios).map(o=><option key={o}>{o}</option>)}
+                </select>
+                <select style={{...S.input,fontSize:13}} value={filtroHist.depto} onChange={e=>setFiltroHist(p=>({...p,depto:e.target.value}))} disabled={!filtroHist.edificio}>
+                  <option value="">Departamento (todos)</option>
+                  {deptosParaHistFiltro.map(o=><option key={o}>{o}</option>)}
+                </select>
+              </div>
+            </div>
+            {tareasHistF.length===0
+              ?<p style={{textAlign:"center",color:"#888",fontSize:15,marginTop:"2rem"}}>Aún no hay completadas con esos filtros.</p>
+              :tareasHistF.map(t=><TareaCard key={t.id} t={t} onEdit={tt=>{setEditando(tt);setShowForm(true);}} onEstado={cambiarEstado} onDelete={eliminarTarea} onComentario={guardarComentario} onIniciar={handleIniciar}/>)
             }
           </div>
         )}
 
+        {/* ── CONFIG ── */}
         {tab==="config"&&(
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem"}}>
             <div style={S.section}>
@@ -1418,20 +1233,48 @@ export default function App(){
                 </div>
               ))}
             </div>
-            <div style={S.section}>
-              <p style={{margin:"0 0 1rem",fontWeight:500,fontSize:15}}>🔧 Tipos de tarea</p>
-              <div style={{display:"flex",gap:"0.5rem",marginBottom:"1rem"}}>
-                <input style={{...S.input,flex:1}} placeholder="Nuevo tipo" value={newTipo} onChange={e=>setNewTipo(e.target.value)}/>
-                <button onClick={async()=>{if(!newTipo.trim())return;await saveTipos([...tipos,newTipo.trim()]);setNewTipo("");}} style={S.btn("#534AB7","#fff")}>+ Agregar</button>
+
+            <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
+              <div style={S.section}>
+                <p style={{margin:"0 0 1rem",fontWeight:500,fontSize:15}}>🔧 Tipos de tarea</p>
+                <div style={{display:"flex",gap:"0.5rem",marginBottom:"1rem"}}>
+                  <input style={{...S.input,flex:1}} placeholder="Nuevo tipo" value={newTipo} onChange={e=>setNewTipo(e.target.value)}/>
+                  <button onClick={async()=>{if(!newTipo.trim())return;await saveTipos([...tipos,newTipo.trim()]);setNewTipo("");}} style={S.btn("#534AB7","#fff")}>+ Agregar</button>
+                </div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                  {tipos.map(t=>(
+                    <span key={t} style={{...S.tag("#EEEDFE","#534AB7","#AFA9EC"),display:"flex",alignItems:"center",gap:4}}>
+                      {t}<button onClick={async()=>await saveTipos(tipos.filter(x=>x!==t))} style={{background:"none",border:"none",cursor:"pointer",color:"#534AB7",fontSize:12,padding:0}}>✕</button>
+                    </span>
+                  ))}
+                </div>
               </div>
-              <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:"1.5rem"}}>
-                {tipos.map(t=>(
-                  <span key={t} style={{...S.tag("#EEEDFE","#534AB7","#AFA9EC"),display:"flex",alignItems:"center",gap:4}}>
-                    {t}<button onClick={async()=>await saveTipos(tipos.filter(x=>x!==t))} style={{background:"none",border:"none",cursor:"pointer",color:"#534AB7",fontSize:12,padding:0}}>✕</button>
-                  </span>
-                ))}
+
+              {/* Gestión de personal */}
+              <div style={S.section}>
+                <p style={{margin:"0 0 1rem",fontWeight:500,fontSize:15}}>👤 Personal / Asignados</p>
+                <div style={{display:"flex",gap:"0.5rem",marginBottom:"1rem"}}>
+                  <input style={{...S.input,flex:1}} placeholder="Nombre o rol" value={newPersonal} onChange={e=>setNewPersonal(e.target.value)}/>
+                  <button onClick={async()=>{
+                    const n=newPersonal.trim();
+                    if(!n||personal.includes(n))return;
+                    await savePersonal([...personal,n]);setNewPersonal("");
+                  }} style={S.btn("#185FA5","#fff")}>+ Agregar</button>
+                </div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                  {personal.map(p=>(
+                    <span key={p} style={{...S.tag("#E6F1FB","#185FA5","#85B7EB"),display:"flex",alignItems:"center",gap:4}}>
+                      {p}
+                      <button onClick={async()=>{
+                        if(!window.confirm(`¿Eliminar a "${p}" de los asignados? Las tareas existentes no se modifican.`))return;
+                        await savePersonal(personal.filter(x=>x!==p));
+                      }} style={{background:"none",border:"none",cursor:"pointer",color:"#A32D2D",fontSize:12,padding:0}}>✕</button>
+                    </span>
+                  ))}
+                </div>
               </div>
-              <div style={{borderTop:"1px solid #ebe9e2",paddingTop:"1rem"}}>
+
+              <div style={S.section}>
                 <p style={{margin:"0 0 0.75rem",fontWeight:500,fontSize:14}}>🔗 Estado de integraciones</p>
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
                   <div style={{background:"#EAF3DE",border:"1px solid #97C459",borderRadius:8,padding:"8px 12px",fontSize:13,color:"#3B6D11"}}>✅ Firebase AlmaDesk conectado</div>
@@ -1456,7 +1299,7 @@ export default function App(){
 
       {showForm&&(
         <Modal onClose={()=>{setShowForm(false);setEditando(null);}} wide>
-          <TareaForm tarea={editando} edificios={edificios} tipos={tipos} onSave={saveTarea} onClose={()=>{setShowForm(false);setEditando(null);}}/>
+          <TareaForm tarea={editando} edificios={edificios} tipos={tipos} personal={personal} onSave={saveTarea} onClose={()=>{setShowForm(false);setEditando(null);}}/>
         </Modal>
       )}
     </div>
