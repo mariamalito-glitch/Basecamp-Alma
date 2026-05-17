@@ -52,14 +52,12 @@ const estStyle = e => {
   if(e==="Pausada")    return {bg:"#FAEEDA",text:"#854F0B",border:"#EF9F27"};
   return {bg:"#F1EFE8",text:"#5F5E5A",border:"#B4B2A9"};
 };
-// Ordenar por fechaCarga desc (más nueva primero)
 const sortDesc = arr => [...arr].sort((a,b)=>{
   const fa=a.fechaCarga||a.fecha||"";
   const fb=b.fechaCarga||b.fecha||"";
   return fb.localeCompare(fa);
 });
 
-// ── Clasificador ──────────────────────────────────────────────────────────────
 function clasificarReporte(texto) {
   const t=(texto||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
   const noMante=["olvido","olvide","perdido","perdida","objeto","ropa","vajilla","vaso","vasos","taza","plato","cubierto","falta reponer","reponer","amenities","toalla falta","sabana","papel higienico","shampoo","jabon","sucio","sucia","limpieza","mancha","olor","basura","mugre"];
@@ -94,7 +92,13 @@ async function loadFirebase(){
 async function aSet(k,v){const {doc,setDoc}=window._fb;await setDoc(doc(dbAlma,"alma",String(k)),{value:JSON.stringify(v)});}
 async function aGet(k){const {doc,getDoc}=window._fb;const s=await getDoc(doc(dbAlma,"alma",String(k)));return s.exists()?JSON.parse(s.data().value):null;}
 function aListen(k,cb){const {doc,onSnapshot}=window._fb;return onSnapshot(doc(dbAlma,"alma",String(k)),s=>{cb(s.exists()?JSON.parse(s.data().value):null);});}
-async function lGet(k){const {doc,getDoc}=window._fb;const s=await getDoc(doc(dbLimp,"limpiezas",String(k)));return s.exists()?JSON.parse(s.data().value):null;}
+
+// FIX: lGet con collection correcta de limpieza
+async function lGet(col,k){
+  const {doc,getDoc}=window._fb;
+  const s=await getDoc(doc(dbLimp,col,String(k)));
+  return s.exists()?JSON.parse(s.data().value):null;
+}
 
 function resizePhoto(file,cb){
   const r=new FileReader();
@@ -192,28 +196,41 @@ function OrigenBadge({origen}){
   return <span style={{...S.tag(c.bg,c.color,c.border),fontSize:11}}>{c.label}</span>;
 }
 
+// FIX: TareaCard con highlight naranja para reportes
 function TareaCard({t,onEdit,onEstado,onDelete,onComentario}){
   const urg=urgStyle(t.urgencia),est=estStyle(t.estado);
   const [open,setOpen]=useState(false);
   const [com,setCom]=useState(t.comentario||"");
   const foto=t.foto||t.fotoReporte||null;
+  const esReporte=t.origen==="reporte";
+
+  const cardStyle={
+    ...S.card,
+    borderLeft:`5px solid ${esReporte?"#E65100":urg.border}`,
+    background: esReporte?"#FFFBF5":"#fff",
+    border: esReporte?"1px solid #FFB74D":"1px solid #e2e0d8",
+    borderLeftWidth:5,
+    borderLeftColor: esReporte?"#E65100":urg.border,
+  };
+
   return(
-    <div style={{...S.card,borderLeft:`5px solid ${urg.border}`}}>
+    <div style={cardStyle}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
         <div style={{flex:1,minWidth:0}}>
           <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:6}}>
+            {esReporte&&<span style={{...S.tag("#FFF3E0","#E65100","#FFB74D"),fontSize:11,fontWeight:700}}>🔗 Reporte</span>}
             {t.huespedAlerta&&<span style={S.tag("#FAECE7","#993C1D","#F5C4B3")}>⚠ Huésped</span>}
             <span style={S.tag(urg.bg,urg.text,urg.border)}>{t.urgencia}</span>
             <span style={S.tag(est.bg,est.text,est.border)}>{t.estado}</span>
             <span style={S.tag("#F1EFE8","#5F5E5A","#B4B2A9")}>{t.tipo}</span>
             {t.recurrente&&<span style={S.tag("#E6F1FB","#185FA5","#85B7EB")}>🔁 Mensual</span>}
             {t.limpieza&&<span style={S.tag("#EEEDFE","#534AB7","#AFA9EC")}>🧹 Limpieza</span>}
-            <OrigenBadge origen={t.origen}/>
           </div>
           <p style={{margin:"0 0 3px",fontWeight:600,fontSize:16}}>{t.titulo}</p>
           <p style={{margin:0,fontSize:13,color:"#888"}}>
             🏢 {t.edificio} · {t.depto||"—"} | 👤 {t.asignado} | 📅 {FMT_DATE(t.fecha)}{t.fechaFin?` → ${FMT_DATE(t.fechaFin)}`:""}
           </p>
+          {t.fechaTrabajo&&<p style={{margin:"2px 0 0",fontSize:12,color:"#185FA5",fontWeight:500}}>📆 Agendada: {FMT_DATE(t.fechaTrabajo)}</p>}
           {t.fechaCarga&&<p style={{margin:"2px 0 0",fontSize:11,color:"#bbb"}}>Cargada: {FMT_DATE(t.fechaCarga)}</p>}
           {t.materiales&&<p style={{margin:"2px 0 0",fontSize:13,color:"#888"}}>🔧 {t.materiales}</p>}
           {foto&&<img src={foto} alt="foto" style={{marginTop:8,maxWidth:160,borderRadius:8,border:"1px solid #e2e0d8",cursor:"zoom-in",display:"block"}} onClick={()=>window.open(foto,"_blank")}/>}
@@ -355,9 +372,12 @@ function TareaForm({tarea,edificios,tipos,onSave,onClose}){
   );
 }
 
+// ── Vista Semanal con FIX de pendientes + mover a día ─────────────────────────
 function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
   const [weekOff,setWeekOff]=useState(0);
   const [arrastrando,setArrastrando]=useState(null);
+  const [moverModal,setMoverModal]=useState(null); // tarea a mover manualmente
+  const [fechaElegida,setFechaElegida]=useState("");
   const weekDays=getWeekDays(TODAY,weekOff);
   const labelSem=`${FMT_DATE(weekDays[0])} — ${FMT_DATE(weekDays[6])}`;
 
@@ -365,19 +385,30 @@ function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
   function onDrop(e,iso){e.preventDefault();if(!arrastrando)return;onMoverTarea(arrastrando.id,iso);setArrastrando(null);}
   function onDragOver(e){e.preventDefault();}
 
+  // FIX: pendientes sin día = no tienen fechaTrabajo asignado (independiente de la semana visible)
+  const sinDia=tareas.filter(t=>t.estado!=="Completada"&&!t.fechaTrabajo);
+  const sinDiaResto=sinDia.filter(t=>t.asignado!=="Obra");
+  const sinDiaObra=sinDia.filter(t=>t.asignado==="Obra");
+
   function MiniCard({t}){
     const urg=urgStyle(t.urgencia);
     const esObra=t.asignado==="Obra";
+    const esRep=t.origen==="reporte";
+    const bg=esObra?"#2D1B69":esRep?"#FFF3E0":urg.bg;
+    const border=esObra?"#7C5CBF":esRep?"#FFB74D":urg.border;
+    const textColor=esObra?"#C9B8FF":esRep?"#E65100":urg.text;
+    const subColor=esObra?"#A084E8":esRep?"#E65100":urg.text;
     return(
       <div draggable onDragStart={e=>onDragStart(e,t)}
-        style={{background:esObra?"#2D1B69":urg.bg,border:`1.5px solid ${esObra?"#7C5CBF":urg.border}`,borderRadius:8,padding:"5px 7px",marginBottom:4,cursor:"grab",fontSize:11}}>
+        style={{background:bg,border:`1.5px solid ${border}`,borderRadius:8,padding:"5px 7px",marginBottom:4,cursor:"grab",fontSize:11}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:4}}>
           <div style={{flex:1,minWidth:0}}>
-            <p style={{margin:"0 0 1px",fontWeight:600,color:esObra?"#C9B8FF":urg.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.titulo}</p>
-            <p style={{margin:0,color:esObra?"#A084E8":urg.text,opacity:0.85,fontSize:10}}>{t.edificio} · {t.depto}</p>
+            <p style={{margin:"0 0 1px",fontWeight:600,color:textColor,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.titulo}</p>
+            <p style={{margin:0,color:subColor,opacity:0.85,fontSize:10}}>{t.edificio} · {t.depto}</p>
           </div>
           <div style={{display:"flex",gap:2,flexShrink:0}}>
             <button title="Editar" onClick={e=>{e.stopPropagation();onEdit(t);}} style={{background:"rgba(255,255,255,0.25)",border:"none",borderRadius:5,width:20,height:20,fontSize:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✏️</button>
+            <button title="Mover a día" onClick={e=>{e.stopPropagation();setMoverModal(t);setFechaElegida(t.fechaTrabajo||TODAY);}} style={{background:"rgba(255,255,255,0.25)",border:"none",borderRadius:5,width:20,height:20,fontSize:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>📅</button>
             {t.fechaTrabajo&&<button title="Quitar día" onClick={e=>{e.stopPropagation();onQuitarDia(t.id);}} style={{background:"rgba(255,255,255,0.25)",border:"none",borderRadius:5,width:20,height:20,fontSize:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>↩</button>}
           </div>
         </div>
@@ -389,7 +420,7 @@ function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
     const esHoy=iso===TODAY;
     const tsAsig=tareas.filter(t=>t.estado!=="Completada"&&t.fechaTrabajo===iso);
     const tsOrig=tareas.filter(t=>t.estado!=="Completada"&&!t.fechaTrabajo&&t.fecha===iso);
-    const todas=[...tsAsig,...tsOrig];
+    const todas=[...tsAsig,...tsOrig.filter(t=>!tsAsig.find(a=>a.id===t.id))];
     const obra=todas.filter(t=>t.asignado==="Obra");
     const resto=todas.filter(t=>t.asignado!=="Obra");
     return(
@@ -412,12 +443,24 @@ function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
     );
   }
 
-  const sinDia=tareas.filter(t=>t.estado!=="Completada"&&!t.fechaTrabajo&&!weekDays.includes(t.fecha));
-  const sinDiaResto=sinDia.filter(t=>t.asignado!=="Obra");
-  const sinDiaObra=sinDia.filter(t=>t.asignado==="Obra");
-
   return(
     <div>
+      {/* Modal mover a día */}
+      {moverModal&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(10,10,20,0.6)",zIndex:3000,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div style={{background:"#fff",borderRadius:16,padding:"1.5rem",width:320,boxShadow:"0 12px 48px rgba(0,0,0,0.25)"}}>
+            <p style={{margin:"0 0 4px",fontWeight:600,fontSize:16}}>📅 Mover tarea</p>
+            <p style={{margin:"0 0 1rem",fontSize:13,color:"#888",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{moverModal.titulo}</p>
+            <label style={S.label}>Elegí el día de trabajo</label>
+            <input type="date" style={{...S.input,marginBottom:"1rem"}} value={fechaElegida} onChange={e=>setFechaElegida(e.target.value)}/>
+            <div style={{display:"flex",gap:"0.5rem",justifyContent:"flex-end"}}>
+              <button onClick={()=>setMoverModal(null)} style={S.btn()}>Cancelar</button>
+              <button onClick={()=>{if(fechaElegida){onMoverTarea(moverModal.id,fechaElegida);setMoverModal(null);}}} style={{...S.btn("#185FA5","#fff")}}>Confirmar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{display:"flex",alignItems:"center",gap:"1rem",marginBottom:"1.25rem",flexWrap:"wrap"}}>
         <button onClick={()=>setWeekOff(o=>o-1)} style={S.btn()}>◀</button>
         <p style={{margin:0,fontWeight:500,fontSize:15,flex:1,textAlign:"center"}}>📅 {labelSem}</p>
@@ -425,27 +468,33 @@ function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
         <button onClick={()=>setWeekOff(o=>o+1)} style={S.btn()}>▶</button>
       </div>
       <div style={{background:"#fff8e1",border:"1px solid #FFE082",borderRadius:12,padding:"0.75rem 1rem",marginBottom:"1rem",fontSize:13,color:"#795548"}}>
-        💡 Arrastrá las tareas hacia el día. ✏️ edita, ↩ quita el día asignado.
+        💡 Arrastrá las tareas hacia el día o usá 📅 para elegir cualquier fecha. ↩ quita el día asignado.
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:6,marginBottom:"1.5rem"}}>
         {weekDays.map(iso=><DiaCol key={iso} iso={iso}/>)}
       </div>
       <div>
         <p style={{margin:"0 0 0.75rem",fontWeight:600,fontSize:14,color:"#555"}}>📋 Pendientes sin día asignado ({sinDia.length})</p>
+        {sinDia.length===0&&<p style={{fontSize:13,color:"#aaa"}}>Todas las tareas tienen día asignado 👍</p>}
         {sinDiaResto.length>0&&<div style={{marginBottom:"0.75rem"}}>
           <p style={{margin:"0 0 0.5rem",fontSize:12,fontWeight:600,color:"#185FA5"}}>🔧 Mantenimiento ({sinDiaResto.length})</p>
           <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
             {sinDiaResto.map(t=>{
               const urg=urgStyle(t.urgencia);
+              const esRep=t.origen==="reporte";
               return(
                 <div key={t.id} draggable onDragStart={e=>onDragStart(e,t)}
-                  style={{background:urg.bg,border:`1px solid ${urg.border}`,borderRadius:8,padding:"6px 10px",cursor:"grab",fontSize:12,maxWidth:200}}>
-                  <div style={{display:"flex",justifyContent:"space-between",gap:4}}>
+                  style={{background:esRep?"#FFF3E0":urg.bg,border:`1px solid ${esRep?"#FFB74D":urg.border}`,borderRadius:8,padding:"6px 10px",cursor:"grab",fontSize:12,maxWidth:200}}>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:4,alignItems:"flex-start"}}>
                     <div>
-                      <p style={{margin:"0 0 2px",fontWeight:600,color:urg.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:150}}>{t.titulo}</p>
-                      <p style={{margin:0,color:urg.text,opacity:0.8,fontSize:11}}>{t.edificio} · {t.depto}</p>
+                      {esRep&&<span style={{fontSize:10,color:"#E65100",fontWeight:700}}>🔗 </span>}
+                      <p style={{margin:"0 0 2px",fontWeight:600,color:esRep?"#E65100":urg.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:130,display:"inline"}}>{t.titulo}</p>
+                      <p style={{margin:0,color:esRep?"#E65100":urg.text,opacity:0.8,fontSize:11}}>{t.edificio} · {t.depto}</p>
                     </div>
-                    <button onClick={e=>{e.stopPropagation();onEdit(t);}} style={{background:"rgba(0,0,0,0.08)",border:"none",borderRadius:4,width:18,height:18,fontSize:9,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✏️</button>
+                    <div style={{display:"flex",gap:2,flexShrink:0}}>
+                      <button onClick={e=>{e.stopPropagation();onEdit(t);}} style={{background:"rgba(0,0,0,0.08)",border:"none",borderRadius:4,width:18,height:18,fontSize:9,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✏️</button>
+                      <button onClick={e=>{e.stopPropagation();setMoverModal(t);setFechaElegida(TODAY);}} style={{background:"rgba(0,0,0,0.08)",border:"none",borderRadius:4,width:18,height:18,fontSize:9,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>📅</button>
+                    </div>
                   </div>
                 </div>
               );
@@ -464,14 +513,12 @@ function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
             ))}
           </div>
         </div>}
-        {sinDia.length===0&&<p style={{fontSize:13,color:"#aaa"}}>Todas las tareas tienen día asignado 👍</p>}
       </div>
     </div>
   );
 }
 
 // ── Preventivo ────────────────────────────────────────────────────────────────
-// prevData = { tareas: string[], meses: { "YYYY-MM": { "ed|dep|tarea": {done, fecha} } }, historial: [...] }
 function Preventivo({edificios, prevData, savePrevData, showToast}){
   const [verHist, setVerHist] = useState(false);
   const [newTarea, setNewTarea] = useState("");
@@ -481,7 +528,6 @@ function Preventivo({edificios, prevData, savePrevData, showToast}){
   const historial= prevData?.historial|| [];
   const celdas   = meses[CURRENT_MONTH] || {};
 
-  // Todos los deptos: [{ed, dep}]
   const allDeptos = [];
   Object.entries(edificios).forEach(([ed, ds]) =>
     ds.forEach(dep => allDeptos.push({ed, dep}))
@@ -489,16 +535,14 @@ function Preventivo({edificios, prevData, savePrevData, showToast}){
 
   const celKey = (ed, dep, tarea) => `${ed}|${dep}|${tarea}`;
 
-  // Buscar la última vez que se hizo esta tarea en meses anteriores
   function ultimaVezRealizada(ed, dep, tarea) {
     const mesesAnteriores = Object.entries(meses)
       .filter(([m]) => m !== CURRENT_MONTH)
-      .sort(([a],[b]) => b.localeCompare(a)); // más reciente primero
+      .sort(([a],[b]) => b.localeCompare(a));
     const k = celKey(ed, dep, tarea);
     for (const [, cels] of mesesAnteriores) {
       if (cels[k]?.done && cels[k]?.fecha) return cels[k].fecha;
     }
-    // También chequear historial archivado
     const hist = [...historial].sort((a,b) => b.mes.localeCompare(a.mes));
     for (const h of hist) {
       if (h.celdas?.[k]?.done && h.celdas[k]?.fecha) return h.celdas[k].fecha;
@@ -510,26 +554,19 @@ function Preventivo({edificios, prevData, savePrevData, showToast}){
     const k = celKey(ed, dep, tarea);
     const prev = {...meses};
     if (!prev[CURRENT_MONTH]) prev[CURRENT_MONTH] = {};
-
     if (prev[CURRENT_MONTH][k]?.done) {
-      // Desmarcar
       delete prev[CURRENT_MONTH][k];
       await savePrevData({...prevData, meses: prev});
       return;
     }
-
-    // Verificar si se hizo hace menos de un mes
     const ultima = ultimaVezRealizada(ed, dep, tarea);
     if (ultima) {
       const diasDesde = Math.floor((new Date(TODAY) - new Date(ultima)) / 86400000);
       if (diasDesde < 30) {
-        const ok = window.confirm(
-          `⚠️ Aviso: esta tarea ya se realizó el ${FMT_DATE(ultima)} (hace ${diasDesde} días, menos de un mes).\n\n¿Querés marcarla igual?`
-        );
+        const ok = window.confirm(`⚠️ Esta tarea ya se realizó el ${FMT_DATE(ultima)} (hace ${diasDesde} días).\n\n¿Marcarla igual?`);
         if (!ok) return;
       }
     }
-
     prev[CURRENT_MONTH][k] = {done: true, fecha: TODAY};
     await savePrevData({...prevData, meses: prev});
   }
@@ -542,8 +579,7 @@ function Preventivo({edificios, prevData, savePrevData, showToast}){
   }
 
   async function removeTarea(t) {
-    if (!window.confirm(`¿Eliminar la columna "${t}" del preventivo?`)) return;
-    // Limpiar celdas de esa tarea en todos los meses
+    if (!window.confirm(`¿Eliminar la columna "${t}"?`)) return;
     const newMeses = {};
     Object.entries(meses).forEach(([m, cels]) => {
       newMeses[m] = {};
@@ -554,33 +590,21 @@ function Preventivo({edificios, prevData, savePrevData, showToast}){
     await savePrevData({...prevData, tareas: tareas.filter(x => x !== t), meses: newMeses});
   }
 
-  // Cerrar mes actual y archivarlo en historial
   async function cerrarMes() {
     const mesLabel = MONTHS[parseInt(CURRENT_MONTH.split("-")[1]) - 1] + " " + CURRENT_MONTH.split("-")[0];
-    if (!window.confirm(`¿Cerrar ${mesLabel} y guardarlo en el historial? La tabla del mes siguiente empezará vacía.`)) return;
-    const snapshot = {
-      mes: CURRENT_MONTH,
-      label: mesLabel,
-      celdas: {...(meses[CURRENT_MONTH] || {})},
-      tareas: [...tareas],
-      deptos: allDeptos.map(({ed, dep}) => ({ed, dep})),
-    };
-    const newHistorial = [...historial, snapshot];
-    // El mes siguiente queda vacío (no se inicializa, se crea al primer uso)
+    if (!window.confirm(`¿Cerrar ${mesLabel} y archivarlo?`)) return;
+    const snapshot = {mes: CURRENT_MONTH, label: mesLabel, celdas: {...(meses[CURRENT_MONTH]||{})}, tareas: [...tareas], deptos: allDeptos.map(({ed,dep})=>({ed,dep}))};
     const newMeses = {...meses};
-    delete newMeses[CURRENT_MONTH]; // se limpia el mes actual para que arranque vacío si se reabre
-    await savePrevData({...prevData, historial: newHistorial, meses: newMeses});
-    showToast("📋 Mes cerrado y archivado en historial");
+    delete newMeses[CURRENT_MONTH];
+    await savePrevData({...prevData, historial: [...historial, snapshot], meses: newMeses});
+    showToast("📋 Mes cerrado y archivado");
   }
 
-  // Progreso del mes actual
   const total = allDeptos.length * tareas.length;
   const done  = Object.values(celdas).filter(v => v?.done).length;
   const pct   = total > 0 ? Math.round(done / total * 100) : 0;
-
   const mesLabel = MONTHS[parseInt(CURRENT_MONTH.split("-")[1]) - 1] + " " + CURRENT_MONTH.split("-")[0];
 
-  // ── Vista historial ──
   if (verHist) return (
     <div>
       <div style={{display:"flex",gap:"0.75rem",alignItems:"center",marginBottom:"1.25rem"}}>
@@ -593,7 +617,7 @@ function Preventivo({edificios, prevData, savePrevData, showToast}){
         const dn  = Object.values(h.celdas||{}).filter(v=>v?.done).length;
         const p   = tot > 0 ? Math.round(dn/tot*100) : 0;
         return (
-          <div key={i} style={{...S.card, marginBottom:"0.75rem"}}>
+          <div key={i} style={{...S.card,marginBottom:"0.75rem"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"0.75rem"}}>
               <p style={{margin:0,fontWeight:600,fontSize:15}}>{h.label}</p>
               <span style={S.tag(p===100?"#EAF3DE":"#E6F1FB",p===100?"#3B6D11":"#185FA5",p===100?"#97C459":"#85B7EB")}>{p}% · {dn}/{tot}</span>
@@ -603,9 +627,7 @@ function Preventivo({edificios, prevData, savePrevData, showToast}){
                 <thead>
                   <tr>
                     <th style={{padding:"5px 10px",background:"#f7f6f2",border:"1px solid #e2e0d8",textAlign:"left",fontWeight:600,color:"#555",minWidth:110,position:"sticky",left:0,zIndex:1}}>Departamento</th>
-                    {(h.tareas||[]).map(t=>(
-                      <th key={t} style={{padding:"5px 10px",background:"#f7f6f2",border:"1px solid #e2e0d8",fontWeight:600,color:"#555",textAlign:"center",minWidth:90}}>{t}</th>
-                    ))}
+                    {(h.tareas||[]).map(t=><th key={t} style={{padding:"5px 10px",background:"#f7f6f2",border:"1px solid #e2e0d8",fontWeight:600,color:"#555",textAlign:"center",minWidth:90}}>{t}</th>)}
                   </tr>
                 </thead>
                 <tbody>
@@ -614,13 +636,9 @@ function Preventivo({edificios, prevData, savePrevData, showToast}){
                       <td style={{padding:"5px 10px",border:"1px solid #e2e0d8",fontWeight:500,color:"#444",position:"sticky",left:0,background:ri%2===0?"#fff":"#fafaf8",zIndex:1}}>{ed} · {dep}</td>
                       {(h.tareas||[]).map(t=>{
                         const v = h.celdas?.[`${ed}|${dep}|${t}`];
-                        return (
-                          <td key={t} style={{padding:"5px 10px",border:"1px solid #e2e0d8",textAlign:"center",background:v?.done?"#EAF3DE":"#fff"}}>
-                            {v?.done
-                              ? <span style={{color:"#3B6D11",fontSize:11}}>✓ {FMT_DATE(v.fecha)}</span>
-                              : <span style={{color:"#ddd",fontSize:14}}>—</span>}
-                          </td>
-                        );
+                        return <td key={t} style={{padding:"5px 10px",border:"1px solid #e2e0d8",textAlign:"center",background:v?.done?"#EAF3DE":"#fff"}}>
+                          {v?.done?<span style={{color:"#3B6D11",fontSize:11}}>✓ {FMT_DATE(v.fecha)}</span>:<span style={{color:"#ddd",fontSize:14}}>—</span>}
+                        </td>;
                       })}
                     </tr>
                   ))}
@@ -633,10 +651,8 @@ function Preventivo({edificios, prevData, savePrevData, showToast}){
     </div>
   );
 
-  // ── Vista principal ──
   return (
     <div>
-      {/* Header */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:"0.75rem",marginBottom:"1.25rem"}}>
         <div>
           <p style={{margin:0,fontWeight:700,fontSize:18}}>🔧 Preventivo — {mesLabel}</p>
@@ -647,8 +663,6 @@ function Preventivo({edificios, prevData, savePrevData, showToast}){
           <button onClick={cerrarMes} style={{...S.btn("#854F0B","#fff")}}>📦 Cerrar mes</button>
         </div>
       </div>
-
-      {/* Barra de progreso */}
       <div style={{marginBottom:"1.25rem"}}>
         <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
           <span style={{fontSize:13,color:"#555",fontWeight:500}}>Progreso del mes</span>
@@ -658,82 +672,52 @@ function Preventivo({edificios, prevData, savePrevData, showToast}){
           <div style={{width:`${pct}%`,height:"100%",background:pct===100?"#3B6D11":"#185FA5",borderRadius:99,transition:"width 0.4s"}}/>
         </div>
       </div>
-
-      {/* Agregar tarea de columna */}
       <div style={{...S.section,padding:"1rem 1.25rem",marginBottom:"1.25rem"}}>
         <p style={{margin:"0 0 0.75rem",fontWeight:500,fontSize:14}}>➕ Agregar tarea al preventivo</p>
         <div style={{display:"flex",gap:"0.5rem"}}>
           <input style={{...S.input,flex:1}} placeholder="Ej: Revisión matafuegos, Limpieza filtros AC..." value={newTarea}
-            onChange={e=>setNewTarea(e.target.value)}
-            onKeyDown={e=>{if(e.key==="Enter")addTarea();}}/>
+            onChange={e=>setNewTarea(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addTarea();}}/>
           <button onClick={addTarea} style={{...S.btn("#185FA5","#fff"),whiteSpace:"nowrap"}}>+ Agregar</button>
         </div>
         {tareas.length > 0 && (
           <div style={{marginTop:"0.75rem",display:"flex",flexWrap:"wrap",gap:6}}>
             {tareas.map(t=>(
               <span key={t} style={{...S.tag("#E6F1FB","#185FA5","#85B7EB"),display:"flex",alignItems:"center",gap:4}}>
-                {t}
-                <button onClick={()=>removeTarea(t)} style={{background:"none",border:"none",cursor:"pointer",color:"#A32D2D",fontSize:13,padding:0,lineHeight:1}}>✕</button>
+                {t}<button onClick={()=>removeTarea(t)} style={{background:"none",border:"none",cursor:"pointer",color:"#A32D2D",fontSize:13,padding:0,lineHeight:1}}>✕</button>
               </span>
             ))}
           </div>
         )}
       </div>
-
-      {/* Tabla de doble entrada */}
       {tareas.length === 0 && (
         <div style={{textAlign:"center",padding:"3rem 0",color:"#aaa"}}>
           <p style={{fontSize:32,marginBottom:8}}>📋</p>
           <p style={{fontSize:15}}>Agregá tareas arriba para armar la tabla preventiva.</p>
         </div>
       )}
-
       {tareas.length > 0 && (
         <div style={{overflowX:"auto"}}>
           <table style={{borderCollapse:"collapse",fontSize:13,width:"100%",minWidth:400+tareas.length*110}}>
             <thead>
               <tr>
-                <th style={{
-                  padding:"8px 12px",background:"#1C2B45",border:"1px solid #2E4A6E",
-                  textAlign:"left",fontWeight:600,color:"#8BAFD4",
-                  minWidth:130,position:"sticky",left:0,zIndex:2
-                }}>Departamento</th>
-                {tareas.map(t=>(
-                  <th key={t} style={{
-                    padding:"8px 12px",background:"#1C2B45",border:"1px solid #2E4A6E",
-                    fontWeight:600,color:"#fff",textAlign:"center",minWidth:110,
-                  }}>{t}</th>
-                ))}
+                <th style={{padding:"8px 12px",background:"#1C2B45",border:"1px solid #2E4A6E",textAlign:"left",fontWeight:600,color:"#8BAFD4",minWidth:130,position:"sticky",left:0,zIndex:2}}>Departamento</th>
+                {tareas.map(t=><th key={t} style={{padding:"8px 12px",background:"#1C2B45",border:"1px solid #2E4A6E",fontWeight:600,color:"#fff",textAlign:"center",minWidth:110}}>{t}</th>)}
               </tr>
             </thead>
             <tbody>
               {allDeptos.map(({ed, dep}, ri) => (
                 <tr key={`${ed}-${dep}`} style={{background:ri%2===0?"#fff":"#fafaf8"}}>
-                  <td style={{
-                    padding:"7px 12px",border:"1px solid #e2e0d8",fontWeight:600,
-                    color:"#333",fontSize:13,position:"sticky",left:0,zIndex:1,
-                    background:ri%2===0?"#fff":"#fafaf8",
-                  }}>
+                  <td style={{padding:"7px 12px",border:"1px solid #e2e0d8",fontWeight:600,color:"#333",fontSize:13,position:"sticky",left:0,zIndex:1,background:ri%2===0?"#fff":"#fafaf8"}}>
                     <span style={{fontSize:11,color:"#aaa",fontWeight:400}}>{ed} · </span>{dep}
                   </td>
                   {tareas.map(tarea => {
-                    const k   = celKey(ed, dep, tarea);
-                    const val = celdas[k];
-                    const done= val?.done;
+                    const k=celKey(ed,dep,tarea), val=celdas[k], done=val?.done;
                     return (
-                      <td key={tarea} style={{
-                        padding:"6px 8px",border:"1px solid #e2e0d8",textAlign:"center",
-                        background:done?"#EAF3DE":"#fff",cursor:"pointer",
-                        transition:"background 0.15s",
-                      }}
-                        onClick={()=>toggleCelda(ed, dep, tarea)}
-                        title={done?`Realizado el ${FMT_DATE(val.fecha)} — clic para desmarcar`:"Clic para marcar como realizado"}
-                      >
+                      <td key={tarea} style={{padding:"6px 8px",border:"1px solid #e2e0d8",textAlign:"center",background:done?"#EAF3DE":"#fff",cursor:"pointer",transition:"background 0.15s"}}
+                        onClick={()=>toggleCelda(ed,dep,tarea)}
+                        title={done?`Realizado el ${FMT_DATE(val.fecha)} — clic para desmarcar`:"Clic para marcar como realizado"}>
                         {done ? (
-                          <div>
-                            <div style={{color:"#3B6D11",fontWeight:700,fontSize:15}}>✓</div>
-                            <div style={{fontSize:10,color:"#5a9a3a"}}>{FMT_DATE(val.fecha)}</div>
-                          </div>
+                          <div><div style={{color:"#3B6D11",fontWeight:700,fontSize:15}}>✓</div><div style={{fontSize:10,color:"#5a9a3a"}}>{FMT_DATE(val.fecha)}</div></div>
                         ) : (
                           <div style={{width:20,height:20,border:"2px solid #dddbd3",borderRadius:4,margin:"0 auto",background:"#f7f6f2"}}/>
                         )}
@@ -750,6 +734,201 @@ function Preventivo({edificios, prevData, savePrevData, showToast}){
   );
 }
 
+// ── Empleados ─────────────────────────────────────────────────────────────────
+function Empleados({empleadosData, saveEmpleadosData, showToast}){
+  const [mesOffset, setMesOffset] = useState(0);
+  const [showNuevo, setShowNuevo] = useState(false);
+  const [nuevoNombre, setNuevoNombre] = useState("");
+  const [nuevoHorasMes, setNuevoHorasMes] = useState(160);
+  const [editEmpleado, setEditEmpleado] = useState(null);
+  const [registroModal, setRegistroModal] = useState(null);
+  const [regFecha, setRegFecha] = useState(TODAY);
+  const [regHoras, setRegHoras] = useState("");
+  const [regNota, setRegNota] = useState("");
+
+  const empleados = empleadosData?.empleados || [];
+  const registros = empleadosData?.registros || {}; // { empId: [{fecha,horas,nota}] }
+
+  // Mes a mostrar
+  const baseDate = new Date(TODAY+"T12:00:00");
+  baseDate.setMonth(baseDate.getMonth()+mesOffset);
+  const mesStr = baseDate.toISOString().slice(0,7); // YYYY-MM
+  const mesLabel = MONTHS[baseDate.getMonth()]+" "+baseDate.getFullYear();
+
+  async function agregarEmpleado(){
+    if(!nuevoNombre.trim()) return;
+    const nuevo={id:Date.now(),nombre:nuevoNombre.trim(),horasMes:Number(nuevoHorasMes)||160};
+    await saveEmpleadosData({...empleadosData,empleados:[...empleados,nuevo]});
+    setNuevoNombre(""); setNuevoHorasMes(160); setShowNuevo(false);
+  }
+
+  async function eliminarEmpleado(id){
+    if(!window.confirm("¿Eliminar empleado?")) return;
+    const newRegs={...registros}; delete newRegs[id];
+    await saveEmpleadosData({...empleadosData,empleados:empleados.filter(e=>e.id!==id),registros:newRegs});
+  }
+
+  async function editarEmpleado(emp){
+    const lista=empleados.map(e=>e.id===emp.id?emp:e);
+    await saveEmpleadosData({...empleadosData,empleados:lista});
+    setEditEmpleado(null); showToast("✅ Empleado actualizado");
+  }
+
+  async function agregarRegistro(){
+    if(!regFecha||!regHoras) return;
+    const id=registroModal.id;
+    const prevRegs=registros[id]||[];
+    const nuevo={id:Date.now(),fecha:regFecha,horas:Number(regHoras),nota:regNota.trim()};
+    const newRegs={...registros,[id]:[...prevRegs,nuevo]};
+    await saveEmpleadosData({...empleadosData,registros:newRegs});
+    setRegFecha(TODAY); setRegHoras(""); setRegNota(""); showToast("✅ Registro guardado");
+  }
+
+  async function eliminarRegistro(empId, regId){
+    const newList=(registros[empId]||[]).filter(r=>r.id!==regId);
+    await saveEmpleadosData({...empleadosData,registros:{...registros,[empId]:newList}});
+  }
+
+  function horasEnMes(empId){
+    return (registros[empId]||[])
+      .filter(r=>r.fecha&&r.fecha.startsWith(mesStr))
+      .reduce((acc,r)=>acc+(r.horas||0),0);
+  }
+
+  return(
+    <div>
+      {/* Modal editar empleado */}
+      {editEmpleado&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(10,10,20,0.6)",zIndex:3000,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div style={{background:"#fff",borderRadius:16,padding:"1.5rem",width:340,boxShadow:"0 12px 48px rgba(0,0,0,0.25)"}}>
+            <p style={{margin:"0 0 1rem",fontWeight:600,fontSize:16}}>✏️ Editar empleado</p>
+            <label style={S.label}>Nombre</label>
+            <input style={{...S.input,marginBottom:"0.75rem"}} value={editEmpleado.nombre} onChange={e=>setEditEmpleado(p=>({...p,nombre:e.target.value}))}/>
+            <label style={S.label}>Horas libres mensuales</label>
+            <input type="number" style={{...S.input,marginBottom:"1rem"}} value={editEmpleado.horasMes} onChange={e=>setEditEmpleado(p=>({...p,horasMes:Number(e.target.value)}))}/>
+            <div style={{display:"flex",gap:"0.5rem",justifyContent:"flex-end"}}>
+              <button onClick={()=>setEditEmpleado(null)} style={S.btn()}>Cancelar</button>
+              <button onClick={()=>editarEmpleado(editEmpleado)} style={{...S.btn("#185FA5","#fff")}}>Guardar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal registrar horas */}
+      {registroModal&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(10,10,20,0.6)",zIndex:3000,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div style={{background:"#fff",borderRadius:16,padding:"1.5rem",width:400,maxHeight:"85vh",overflowY:"auto",boxShadow:"0 12px 48px rgba(0,0,0,0.25)"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem"}}>
+              <p style={{margin:0,fontWeight:600,fontSize:16}}>⏱️ Registros — {registroModal.nombre}</p>
+              <button onClick={()=>setRegistroModal(null)} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#888"}}>✕</button>
+            </div>
+            <div style={{...S.section,padding:"1rem",marginBottom:"1rem"}}>
+              <p style={{margin:"0 0 0.75rem",fontWeight:500,fontSize:14}}>+ Agregar registro</p>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0.5rem",marginBottom:"0.5rem"}}>
+                <div><label style={S.label}>Fecha</label><input type="date" style={S.input} value={regFecha} onChange={e=>setRegFecha(e.target.value)}/></div>
+                <div><label style={S.label}>Horas trabajadas</label><input type="number" min={0.5} step={0.5} style={S.input} value={regHoras} onChange={e=>setRegHoras(e.target.value)} placeholder="Ej: 4"/></div>
+              </div>
+              <label style={S.label}>Nota (opcional)</label>
+              <input style={{...S.input,marginBottom:"0.75rem"}} value={regNota} onChange={e=>setRegNota(e.target.value)} placeholder="Tarea realizada..."/>
+              <button onClick={agregarRegistro} style={{...S.btn("#185FA5","#fff"),width:"100%",justifyContent:"center"}}>+ Guardar registro</button>
+            </div>
+            {/* Lista de registros del mes */}
+            <p style={{margin:"0 0 0.5rem",fontSize:13,fontWeight:600,color:"#555"}}>{mesLabel}</p>
+            {(registros[registroModal.id]||[]).filter(r=>r.fecha?.startsWith(mesStr)).length===0
+              ?<p style={{fontSize:13,color:"#aaa"}}>Sin registros este mes.</p>
+              :[...(registros[registroModal.id]||[])].filter(r=>r.fecha?.startsWith(mesStr)).sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(r=>(
+                <div key={r.id} style={{...S.card,padding:"0.6rem 0.875rem",marginBottom:"0.4rem",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div>
+                    <span style={{fontSize:13,fontWeight:600,color:"#185FA5"}}>{r.horas}h</span>
+                    <span style={{fontSize:13,color:"#888",marginLeft:8}}>{FMT_DATE(r.fecha)}</span>
+                    {r.nota&&<p style={{margin:"2px 0 0",fontSize:12,color:"#aaa"}}>{r.nota}</p>}
+                  </div>
+                  <button onClick={()=>eliminarRegistro(registroModal.id,r.id)} style={{...S.btn("#FCEBEB","#A32D2D"),padding:"3px 8px",fontSize:11,border:"1px solid #F09595"}}>🗑️</button>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:"0.75rem",marginBottom:"1.25rem"}}>
+        <div>
+          <p style={{margin:0,fontWeight:700,fontSize:18}}>👥 Empleados</p>
+          <p style={{margin:"2px 0 0",fontSize:13,color:"#888"}}>Control de horas libres mensuales</p>
+        </div>
+        <div style={{display:"flex",gap:"0.5rem",alignItems:"center"}}>
+          <button onClick={()=>setMesOffset(o=>o-1)} style={S.btn()}>◀</button>
+          <span style={{fontSize:14,fontWeight:500,minWidth:120,textAlign:"center"}}>{mesLabel}</span>
+          <button onClick={()=>setMesOffset(o=>o+1)} style={S.btn()}>▶</button>
+          <button onClick={()=>setShowNuevo(v=>!v)} style={{...S.btn("#185FA5","#fff"),marginLeft:8}}>+ Empleado</button>
+        </div>
+      </div>
+
+      {/* Formulario nuevo empleado */}
+      {showNuevo&&(
+        <div style={{...S.section,marginBottom:"1.25rem"}}>
+          <p style={{margin:"0 0 0.75rem",fontWeight:500,fontSize:15}}>➕ Nuevo empleado</p>
+          <div style={{display:"grid",gridTemplateColumns:"2fr 1fr auto",gap:"0.75rem",alignItems:"end"}}>
+            <div><label style={S.label}>Nombre</label><input style={S.input} value={nuevoNombre} onChange={e=>setNuevoNombre(e.target.value)} placeholder="Nombre completo"/></div>
+            <div><label style={S.label}>Horas libres / mes</label><input type="number" style={S.input} value={nuevoHorasMes} onChange={e=>setNuevoHorasMes(e.target.value)} min={1}/></div>
+            <button onClick={agregarEmpleado} style={{...S.btn("#3B6D11","#fff"),whiteSpace:"nowrap"}}>+ Agregar</button>
+          </div>
+        </div>
+      )}
+
+      {/* Grilla empleados */}
+      {empleados.length===0&&(
+        <div style={{textAlign:"center",padding:"3rem 0",color:"#aaa"}}>
+          <p style={{fontSize:36}}>👤</p>
+          <p style={{fontSize:15}}>Aún no hay empleados. Agregá el primero arriba.</p>
+        </div>
+      )}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:"1rem"}}>
+        {empleados.map(emp=>{
+          const horas=horasEnMes(emp.id);
+          const libre=Math.max(0,emp.horasMes-horas);
+          const pct=emp.horasMes>0?Math.min(100,Math.round(horas/emp.horasMes*100)):0;
+          const color=pct>=90?"#A32D2D":pct>=70?"#854F0B":"#185FA5";
+          const bgBar=pct>=90?"#F09595":pct>=70?"#EF9F27":"#85B7EB";
+          return(
+            <div key={emp.id} style={{...S.card,border:"1px solid #e2e0d8",borderRadius:14,padding:"1rem 1.25rem"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"0.75rem"}}>
+                <div>
+                  <p style={{margin:0,fontWeight:700,fontSize:16}}>{emp.nombre}</p>
+                  <p style={{margin:"2px 0 0",fontSize:12,color:"#888"}}>{emp.horasMes}h libres/mes</p>
+                </div>
+                <div style={{display:"flex",gap:4}}>
+                  <button onClick={()=>setEditEmpleado({...emp})} style={{...S.btn(),padding:"4px 8px",fontSize:12}}>✏️</button>
+                  <button onClick={()=>eliminarEmpleado(emp.id)} style={{...S.btn("#FCEBEB","#A32D2D"),padding:"4px 8px",fontSize:12,border:"1px solid #F09595"}}>🗑️</button>
+                </div>
+              </div>
+              {/* Barra de horas */}
+              <div style={{marginBottom:"0.5rem"}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                  <span style={{fontSize:12,color:"#555"}}>Trabajadas: <strong style={{color}}>{horas}h</strong></span>
+                  <span style={{fontSize:12,color:"#888"}}>Libres: {libre}h</span>
+                </div>
+                <div style={{background:"#e2e0d8",borderRadius:99,height:8,overflow:"hidden"}}>
+                  <div style={{width:`${pct}%`,height:"100%",background:bgBar,borderRadius:99,transition:"width 0.4s"}}/>
+                </div>
+                <p style={{margin:"3px 0 0",fontSize:11,color:color,fontWeight:pct>=90?700:400}}>
+                  {pct}% utilizado
+                  {pct>=90?" — ⚠️ Cerca del límite":""}
+                </p>
+              </div>
+              <button onClick={()=>{setRegistroModal(emp);setRegFecha(TODAY);setRegHoras("");setRegNota("");}}
+                style={{...S.btn("#E6F1FB","#185FA5"),width:"100%",justifyContent:"center",fontSize:13,padding:"7px 0",border:"1px solid #85B7EB"}}>
+                ⏱️ Ver registros / Cargar horas
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── App Principal ─────────────────────────────────────────────────────────────
 export default function App(){
   const [tab,setTab]=useState("dashboard");
@@ -757,6 +936,7 @@ export default function App(){
   const [edificios,setEdificiosState]=useState(EDIFICIOS_INIT);
   const [tipos,setTiposState]=useState(TIPOS_INIT);
   const [prevData,setPrevDataState]=useState({tareas:[],meses:{},historial:[]});
+  const [empleadosData,setEmpleadosDataState]=useState({empleados:[],registros:{}});
   const [showForm,setShowForm]=useState(false);
   const [editando,setEditando]=useState(null);
   const [filtro,setFiltro]=useState({edificio:"",urgencia:"",estado:"",tipo:"",asignado:""});
@@ -778,15 +958,16 @@ export default function App(){
   const saveEdificios=useCallback(async v=>{setEdificiosState(v);try{await aSet("alma_edificios",v);}catch(e){console.error(e);};},[]);
   const saveTipos=useCallback(async v=>{setTiposState(v);try{await aSet("alma_tipos",v);}catch(e){console.error(e);};},[]);
   const savePrevData=useCallback(async v=>{setPrevDataState(v);try{await aSet("alma_preventivo",v);}catch(e){console.error(e);};},[]);
+  const saveEmpleadosData=useCallback(async v=>{setEmpleadosDataState(v);try{await aSet("alma_empleados",v);}catch(e){console.error(e);};},[]);
 
   useEffect(()=>{
     let mounted=true;
     (async()=>{
       try{
         await loadFirebase();
-        const [t,e,ti,pv,proc]=await Promise.all([
+        const [t,e,ti,pv,proc,emp]=await Promise.all([
           aGet("alma_tasks"),aGet("alma_edificios"),aGet("alma_tipos"),
-          aGet("alma_preventivo"),aGet("alma_procesados"),
+          aGet("alma_preventivo"),aGet("alma_procesados"),aGet("alma_empleados"),
         ]);
         if(!mounted) return;
         if(t) setTareasState(t);
@@ -794,9 +975,11 @@ export default function App(){
         if(ti) setTiposState(ti);
         if(pv) setPrevDataState(pv);
         if(proc){procesadosRef.current=new Set(proc);setProcesadosIds(new Set(proc));}
+        if(emp) setEmpleadosDataState(emp);
         const u1=aListen("alma_tasks",d=>{if(mounted&&d)setTareasState(d);});
         const u2=aListen("alma_preventivo",d=>{if(mounted&&d)setPrevDataState(d);});
-        unsubs.current.push(u1,u2);
+        const u3=aListen("alma_empleados",d=>{if(mounted&&d)setEmpleadosDataState(d);});
+        unsubs.current.push(u1,u2,u3);
         setLoading(false);
         checkReportes();
         const iv=setInterval(checkReportes,60000);
@@ -807,10 +990,17 @@ export default function App(){
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
+  // FIX checkReportes: usa lGet con col y key correctos, y maneja arrays dentro de documentos
   const checkReportes=useCallback(async()=>{
     try{
-      const reps=await lGet("lim_reports");
+      // Intentar con ambas estructuras posibles del DB de limpieza
+      let reps=null;
+      try{ reps=await lGet("limpiezas","lim_reports"); }catch(e){}
+      if(!reps||!Array.isArray(reps)){
+        try{ reps=await lGet("lim_reports","data"); }catch(e){}
+      }
       if(!reps||!Array.isArray(reps)) return;
+
       const nuevos=reps.filter(r=>r.comentario?.trim()&&!procesadosRef.current.has(String(r.id)));
       if(!nuevos.length) return;
       let tareasAct=await aGet("alma_tasks")||[];
@@ -842,14 +1032,14 @@ export default function App(){
       }
       await aSet("alma_tasks",tareasAct);
       setTareasState(tareasAct);
-    }catch(e){console.error(e);}
+    }catch(e){console.error("checkReportes error:",e);}
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
   const enviarLimpieza=useCallback(async tarea=>{
     if(!tarea.limpieza||!tarea.fechaFin) return;
     try{
-      const lt=await lGet("lim_tasks")||[];
+      const lt=await lGet("limpiezas","lim_tasks")||[];
       if(lt.some(t=>t._almaId===tarea.id)) return;
       const n={id:Date.now(),_almaId:tarea.id,depto:`${tarea.edificio} ${tarea.depto}`,fecha:tarea.fechaFin,tipo:"Otro",descripcion:`🔧 Post-mantenimiento: ${tarea.titulo}`,comentario:"Limpieza tras mantenimiento",asignado:"",completado:false,ingresos:[],minutosOtro:null,libre:false};
       const {doc,setDoc}=window._fb;
@@ -905,7 +1095,6 @@ export default function App(){
     }));
   },[tareas,saveTareas]);
 
-  // Ordenar siempre por fechaCarga desc
   const tareasActivas=sortDesc(tareas.filter(t=>t.estado!=="Completada"));
   const tareasComp   =sortDesc(tareas.filter(t=>t.estado==="Completada"));
   const urgentes     =sortDesc(tareasActivas.filter(t=>t.urgencia==="Urgente"));
@@ -929,6 +1118,7 @@ export default function App(){
     {id:"semanal",icon:"📆",label:"Organización"},
     {id:"preventivo",icon:"🔧",label:"Preventivo"},
     {id:"edificios",icon:"🏢",label:"Edificios"},
+    {id:"empleados",icon:"👥",label:"Empleados"},
     {id:"historial",icon:"📋",label:"Historial"},
     {id:"config",icon:"⚙️",label:"Config"},
   ];
@@ -1028,13 +1218,13 @@ export default function App(){
                 {(()=>{
                   const fin=new Date();fin.setDate(fin.getDate()+7);
                   const finStr=fin.toISOString().slice(0,10);
-                  const ts=sortDesc(tareasActivas.filter(t=>t.fecha>=TODAY&&t.fecha<=finStr));
+                  const ts=sortDesc(tareasActivas.filter(t=>(t.fechaTrabajo||t.fecha)>=TODAY&&(t.fechaTrabajo||t.fecha)<=finStr));
                   if(!ts.length) return <p style={{color:"#888",fontSize:14}}>Sin tareas próximas.</p>;
                   return ts.map(t=>(
                     <div key={t.id} style={{padding:"8px 10px",background:t.origen==="reporte"?"#FFF3E0":"#fff",borderRadius:8,marginBottom:6,borderLeft:`4px solid ${t.origen==="reporte"?"#FFB74D":urgStyle(t.urgencia).border}`}}>
                       <p style={{margin:0,fontWeight:500,fontSize:14}}>{t.titulo}</p>
-                      <p style={{margin:0,fontSize:12,color:"#888"}}>🏢 {t.edificio} · {FMT_DATE(t.fecha)}</p>
-                      <p style={{margin:"2px 0 0",fontSize:11,color:"#bbb"}}>Cargada: {FMT_DATE(t.fechaCarga||t.fecha)}</p>
+                      <p style={{margin:0,fontSize:12,color:"#888"}}>🏢 {t.edificio} · 📅 {FMT_DATE(t.fechaTrabajo||t.fecha)}</p>
+                      {t.origen==="reporte"&&<span style={{fontSize:11,color:"#E65100"}}>🔗 Reporte</span>}
                     </div>
                   ));
                 })()}
@@ -1050,7 +1240,7 @@ export default function App(){
                           <span style={S.tag(urgStyle(t.urgencia).bg,urgStyle(t.urgencia).text,urgStyle(t.urgencia).border)}>{t.urgencia}</span>
                         </div>
                         <p style={{margin:"2px 0 0",fontSize:12,color:"#888"}}>🏢 {t.edificio} · {t.depto} | 🔧 {t.tipo} | 📅 {FMT_DATE(t.fecha)}</p>
-                        <p style={{margin:"2px 0 0",fontSize:11,color:"#bbb"}}>Cargada: {FMT_DATE(t.fechaCarga||t.fecha)}</p>
+                        {t.fechaTrabajo&&<p style={{margin:"2px 0 0",fontSize:11,color:"#185FA5"}}>📆 Agendada: {FMT_DATE(t.fechaTrabajo)}</p>}
                       </div>
                       {(t.fotoReporte||t.foto)&&<img src={t.fotoReporte||t.foto} alt="foto" style={{width:56,height:56,objectFit:"cover",borderRadius:8,border:"1px solid #FFB74D",flexShrink:0,cursor:"zoom-in"}} onClick={()=>window.open(t.fotoReporte||t.foto,"_blank")}/>}
                     </div>
@@ -1066,6 +1256,12 @@ export default function App(){
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem"}}>
               <p style={{margin:0,fontWeight:500,fontSize:16}}>Tareas activas ({tareasF.length})</p>
               <button onClick={()=>{setEditando(null);setShowForm(true);}} style={{...S.btn("#185FA5","#fff"),fontSize:15,padding:"9px 20px"}}>+ Nueva tarea</button>
+            </div>
+            {/* Leyenda de colores */}
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:"0.75rem",alignItems:"center"}}>
+              <span style={{fontSize:12,color:"#888"}}>Color:</span>
+              <span style={{...S.tag("#FFFBF5","#E65100","#FFB74D"),fontSize:11}}>🔗 Desde reporte</span>
+              <span style={{...S.tag("#fff","#5F5E5A","#B4B2A9"),fontSize:11}}>Tarea manual</span>
             </div>
             <div style={{...S.section,padding:"1rem 1.25rem",marginBottom:"1rem"}}>
               <p style={{margin:"0 0 0.75rem",fontSize:13,fontWeight:500,color:"#888"}}>FILTROS</p>
@@ -1132,6 +1328,12 @@ export default function App(){
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {tab==="empleados"&&(
+          <div style={S.section}>
+            <Empleados empleadosData={empleadosData} saveEmpleadosData={saveEmpleadosData} showToast={showToast}/>
           </div>
         )}
 
