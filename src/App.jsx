@@ -1,6 +1,6 @@
-// ── AlmaDesk · versión actualizada ────────────────────────────────────────────
 import { useState, useEffect, useRef, useCallback } from "react";
 
+// ── Constantes ────────────────────────────────────────────────────────────────
 const FIREBASE_CONFIG_ALMA = {
   apiKey: "AIzaSyD5PCOXHJQnOJAeffxijG90n_CRm_DlCXM",
   authDomain: "basecamp-alma.firebaseapp.com",
@@ -23,64 +23,50 @@ const EDIFICIOS_INIT = {
   H475: ["101","102","103","201","202","203","204","301","302","PH 1","PH 2","Zona común","SUM","Cochera"]
 };
 const URGENCIAS = [
-  {label:"Urgente",bg:"#FCEBEB",text:"#A32D2D",border:"#F09595"},
-  {label:"Media",  bg:"#FAEEDA",text:"#854F0B",border:"#EF9F27"},
-  {label:"Baja",   bg:"#EAF3DE",text:"#3B6D11",border:"#97C459"},
+  {label:"Urgente", bg:"#FEE2E2", text:"#991B1B", border:"#FCA5A5", dot:"#EF4444"},
+  {label:"Media",   bg:"#FEF3C7", text:"#92400E", border:"#FCD34D", dot:"#F59E0B"},
+  {label:"Baja",    bg:"#D1FAE5", text:"#065F46", border:"#6EE7B7", dot:"#10B981"},
 ];
 const TIPOS_INIT = ["Eléctrica","Sanitaria","Pintura","Obra mayor","Albañilería","Herrería","Gas","Limpieza","Cerrajería","General","Otro"];
-// Estados ahora incluye "Asignada"
 const ESTADOS = ["Pendiente","Asignada","En curso","Pausada","Completada"];
 const PERSONAL_INIT = ["Yo","Mantenimiento Alma Rentals","Obra"];
 const MONTHS = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
-const DIAS_CORTO = ["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
+const DIAS = ["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
 
-const FMT_DATE = d => { if(!d) return "—"; const [y,m,dd]=d.split("-"); return `${dd}/${m}/${y}`; };
 const TODAY = new Date().toISOString().slice(0,10);
 const CURRENT_MONTH = TODAY.slice(0,7);
 
-const S = {
-  card:    {background:"#fff",border:"1px solid #e2e0d8",borderRadius:14,padding:"1rem 1.25rem",marginBottom:"1rem"},
-  section: {background:"#f7f6f2",border:"1px solid #ebe9e2",borderRadius:16,padding:"1.5rem",marginBottom:"1.25rem"},
-  label:   {fontSize:12,color:"#888",marginBottom:4,display:"block",fontWeight:500,textTransform:"uppercase",letterSpacing:"0.04em"},
-  input:   {width:"100%",boxSizing:"border-box",fontSize:14,padding:"8px 10px",borderRadius:8,border:"1px solid #dddbd3",background:"#fff",color:"#222"},
-  btn:     (bg,col)=>({background:bg||"#fff",color:col||"#333",border:`1px solid ${bg||"#dddbd3"}`,borderRadius:8,padding:"8px 16px",cursor:"pointer",fontWeight:500,fontSize:14,display:"inline-flex",alignItems:"center",gap:6}),
-  tag:     (bg,col,border)=>({background:bg,color:col,border:`1px solid ${border}`,borderRadius:20,fontSize:12,fontWeight:500,padding:"2px 10px",whiteSpace:"nowrap"}),
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const fmtDate = d => { if(!d) return "—"; const [y,m,dd]=d.split("-"); return `${dd}/${m}/${y}`; };
+const sortDesc = arr => [...arr].sort((a,b) => (b.fechaCarga||b.fecha||"").localeCompare(a.fechaCarga||a.fecha||""));
+const dedup = arr => { const s=new Set(); return arr.filter(t=>{ const k=String(t.id); if(s.has(k))return false; s.add(k); return true; }); };
+
+const urgStyle = u => URGENCIAS.find(x=>x.label===u) || URGENCIAS[2];
+const estColor = e => {
+  if(e==="Completada") return {bg:"#D1FAE5",text:"#065F46",border:"#6EE7B7"};
+  if(e==="En curso")   return {bg:"#DBEAFE",text:"#1E40AF",border:"#93C5FD"};
+  if(e==="Pausada")    return {bg:"#FEF3C7",text:"#92400E",border:"#FCD34D"};
+  if(e==="Asignada")   return {bg:"#EDE9FE",text:"#5B21B6",border:"#C4B5FD"};
+  return {bg:"#F3F4F6",text:"#374151",border:"#D1D5DB"};
 };
 
-const urgStyle = u => URGENCIAS.find(x=>x.label===u)||URGENCIAS[2];
-const estStyle = e => {
-  if(e==="Completada") return {bg:"#EAF3DE",text:"#3B6D11",border:"#97C459"};
-  if(e==="En curso")   return {bg:"#E6F1FB",text:"#185FA5",border:"#85B7EB"};
-  if(e==="Pausada")    return {bg:"#FAEEDA",text:"#854F0B",border:"#EF9F27"};
-  if(e==="Asignada")   return {bg:"#F3E8FF",text:"#6B21A8",border:"#C084FC"};
-  return {bg:"#F1EFE8",text:"#5F5E5A",border:"#B4B2A9"};
-};
-const sortDesc = arr => [...arr].sort((a,b)=>{
-  const fa=a.fechaCarga||a.fecha||"";
-  const fb=b.fechaCarga||b.fecha||"";
-  return fb.localeCompare(fa);
-});
-
-// Deduplicar tareas por id
-const deduplicar = arr => {
-  const seen = new Set();
-  return arr.filter(t => {
-    const k = String(t.id);
-    if(seen.has(k)) return false;
-    seen.add(k);
-    return true;
+function getWeekDays(offset=0) {
+  const now = new Date();
+  const dow = now.getDay();
+  const lunes = new Date(now);
+  lunes.setDate(now.getDate() - (dow===0?6:dow-1) + offset*7);
+  return Array.from({length:7},(_,i)=>{
+    const d = new Date(lunes); d.setDate(lunes.getDate()+i);
+    return d.toISOString().slice(0,10);
   });
-};
+}
 
 function clasificarReporte(texto) {
   const t=(texto||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
   const noMante=["olvido","olvide","perdido","perdida","objeto","ropa","vajilla","vaso","vasos","taza","plato","cubierto","falta reponer","reponer","amenities","toalla falta","sabana","papel higienico","shampoo","jabon","sucio","sucia","limpieza","mancha","olor","basura","mugre"];
-  // Si hay palabras de mantenimiento estructural, no las filtramos aunque suenen a limpieza
   const forzarMante=["flojo","floja","salido","salida","caido","caida","suelto","suelta","roto","rota","desprendido","desprendida","caída","aflojado","torcido","rajadura","grieta","quebrado","quebrada"];
   const esForzado = forzarMante.some(p=>t.includes(p));
-  if(!esForzado) {
-  for(const p of noMante) if(t.includes(p)) return {esMantenimiento:false};
-  }
+  if(!esForzado) { for(const p of noMante) if(t.includes(p)) return {esMantenimiento:false}; }
   const checks=[
     {words:["sin luz","no hay luz","no anda la luz","disyuntor","tablero","tomacorriente","enchufe","lampara","electricidad","electrico","calefactor","aire acondicionado","no enfria","no calienta"],tipo:"Eléctrica",urgFn:w=>w==="sin luz"||w==="no hay luz"},
     {words:["sin agua","no sale agua","perdida de agua","inundacion","canilla","caño","pileta","inodoro","ducha","gotea","presion","desague","humedad","calefon","termotanque","baño"],tipo:"Sanitaria",urgFn:w=>w==="sin agua"||w==="no sale agua"||w==="inundacion"},
@@ -88,7 +74,7 @@ function clasificarReporte(texto) {
     {words:["caja fuerte","cerradura","no abre","no cierra","traba","cerrojo","puerta trabada","candado","pomo","llave"],tipo:"Cerrajería",urgFn:()=>false},
     {words:["caido","roto","rajado","rajadura","grieta","pared","techo","piso","baldosa","azulejo","estante","madera","bisagra","ventana rota","vidrio","persiana","espejo"],tipo:"Albañilería",urgFn:()=>false},
     {words:["reja","baranda","barandal","oxidado"],tipo:"Herrería",urgFn:()=>false},
-    {words:["no funciona","no anda","no sirve","daño","dañado","falla","desprendido","caída","flojo","floja","salido","salida","caido","caída","caida","suelto","suelta","roto","rota","quebrado","quebrada","desprendido","desprendida","aflojado","torcido"],tipo:"General",urgFn:()=>false},
+    {words:["no funciona","no anda","no sirve","daño","dañado","falla","desprendido","caída","flojo","floja","salido","salida","caido","caida","suelto","suelta","roto","rota","quebrado"],tipo:"General",urgFn:()=>false},
   ];
   for(const {words,tipo,urgFn} of checks)
     for(const w of words)
@@ -114,8 +100,7 @@ function aListen(k,cb){const {doc,onSnapshot}=window._fb;return onSnapshot(doc(d
 async function lGet(k){const {doc,getDoc}=window._fb;const s=await getDoc(doc(dbLimp,"limpiezas",String(k)));return s.exists()?JSON.parse(s.data().value):null;}
 
 function resizePhoto(file,cb){
-  const r=new FileReader();
-  r.onload=ev=>{
+  const r=new FileReader(); r.onload=ev=>{
     const img=new Image(); img.src=ev.target.result;
     img.onload=()=>{
       const MAX=800,c=document.createElement("canvas");
@@ -124,82 +109,324 @@ function resizePhoto(file,cb){
       c.width=w;c.height=h;c.getContext("2d").drawImage(img,0,0,w,h);
       cb(c.toDataURL("image/jpeg",0.72));
     };
-  };
-  r.readAsDataURL(file);
+  }; r.readAsDataURL(file);
 }
 
-function getWeekDays(baseDate,offset){
-  const d=new Date(baseDate+"T12:00:00");
-  const dow=d.getDay();
-  const lunes=new Date(d); lunes.setDate(d.getDate()-(dow===0?6:dow-1)+(offset*7));
-  return Array.from({length:7},(_,i)=>{
-    const x=new Date(lunes); x.setDate(lunes.getDate()+i);
-    return x.toISOString().slice(0,10);
-  });
+// ── Design tokens ─────────────────────────────────────────────────────────────
+const C = {
+  bg: "#F8F7F4",
+  card: "#FFFFFF",
+  border: "#E5E3DC",
+  blue: "#2563EB",
+  blueLight: "#EFF6FF",
+  text: "#111827",
+  textMuted: "#6B7280",
+  textLight: "#9CA3AF",
+  danger: "#DC2626",
+  dangerLight: "#FEF2F2",
+  success: "#059669",
+  successLight: "#ECFDF5",
+  warn: "#D97706",
+  warnLight: "#FFFBEB",
+  purple: "#7C3AED",
+  purpleLight: "#F5F3FF",
+  shadow: "0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04)",
+  shadowMd: "0 4px 6px rgba(0,0,0,0.07), 0 2px 4px rgba(0,0,0,0.05)",
+  shadowLg: "0 10px 25px rgba(0,0,0,0.12)",
+};
+
+const inp = {width:"100%",boxSizing:"border-box",fontSize:14,padding:"9px 12px",borderRadius:8,border:`1px solid ${C.border}`,background:"#fff",color:C.text,outline:"none"};
+const btn = (bg,col,bd)=>({background:bg||"#fff",color:col||C.text,border:`1.5px solid ${bd||bg||C.border}`,borderRadius:8,padding:"8px 16px",cursor:"pointer",fontWeight:500,fontSize:14,display:"inline-flex",alignItems:"center",gap:6,transition:"opacity 0.15s"});
+const pill = (bg,col,bd)=>({background:bg,color:col,border:`1px solid ${bd}`,borderRadius:20,fontSize:11,fontWeight:600,padding:"3px 10px",whiteSpace:"nowrap",display:"inline-block"});
+
+// ── Componentes base ──────────────────────────────────────────────────────────
+function Badge({label,bg,text,border}){
+  return <span style={pill(bg,text,border)}>{label}</span>;
 }
 
-function Modal({onClose,children,wide}){
+function Toast({msg,tipo}){
+  return(
+    <div style={{position:"fixed",top:16,right:16,zIndex:9999,background:tipo==="err"?"#DC2626":"#1D4ED8",color:"#fff",borderRadius:10,padding:"12px 20px",fontSize:14,fontWeight:600,boxShadow:C.shadowLg,maxWidth:380,display:"flex",alignItems:"center",gap:8}}>
+      <span>{tipo==="err"?"⚠️":"✅"}</span>{msg}
+    </div>
+  );
+}
+
+function Modal({onClose,children,wide,title}){
   return(
     <div onClick={e=>{if(e.target===e.currentTarget)onClose();}}
-      style={{position:"fixed",inset:0,background:"rgba(10,10,20,0.65)",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
-      <div style={{background:"#fff",borderRadius:18,padding:"2rem",width:"100%",maxWidth:wide?820:560,maxHeight:"92vh",overflowY:"auto",boxShadow:"0 12px 48px rgba(0,0,0,0.25)"}}>
-        {children}
+      style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem",backdropFilter:"blur(2px)"}}>
+      <div style={{background:"#fff",borderRadius:20,padding:"0",width:"100%",maxWidth:wide?860:580,maxHeight:"92vh",overflowY:"auto",boxShadow:C.shadowLg}}>
+        {title&&(
+          <div style={{padding:"1.25rem 1.5rem",borderBottom:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:"#fff",zIndex:1,borderRadius:"20px 20px 0 0"}}>
+            <h2 style={{margin:0,fontSize:17,fontWeight:700,color:C.text}}>{title}</h2>
+            <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:C.textMuted,lineHeight:1,padding:"2px 6px",borderRadius:6}}>✕</button>
+          </div>
+        )}
+        <div style={{padding:"1.5rem"}}>{children}</div>
       </div>
     </div>
   );
 }
 
-// Modal para elegir fecha de inicio al comenzar tarea
-function ModalIniciarFecha({tarea, onConfirm, onClose}){
-  const [fecha, setFecha] = useState(tarea.fecha || TODAY);
-  return (
+// ── Tarjeta de Tarea ──────────────────────────────────────────────────────────
+function TareaCard({t, onEdit, onEstado, onDelete, onComentario, onIniciar, compact}){
+  const [open, setOpen] = useState(false);
+  const [com, setCom] = useState(t.comentario||"");
+  const urg = urgStyle(t.urgencia);
+  const est = estColor(t.estado);
+  const foto = t.foto||t.fotoReporte||null;
+  const esComp = t.estado==="Completada";
+
+  return(
+    <div style={{
+      background:"#fff",
+      border:`1px solid ${C.border}`,
+      borderRadius:14,
+      overflow:"hidden",
+      marginBottom:10,
+      boxShadow:C.shadow,
+      borderLeft:`4px solid ${urg.dot}`,
+      opacity: esComp ? 0.75 : 1,
+    }}>
+      {/* Header de la tarjeta */}
+      <div style={{padding:"12px 16px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
+          <div style={{flex:1,minWidth:0}}>
+            {/* Tags */}
+            <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:7}}>
+              <Badge label={t.urgencia} bg={urg.bg} text={urg.text} border={urg.border}/>
+              <Badge label={t.estado} bg={est.bg} text={est.text} border={est.border}/>
+              <Badge label={t.tipo} bg="#F3F4F6" text="#374151" border="#D1D5DB"/>
+              {t.huespedAlerta && <Badge label="⚠ Huésped" bg="#FEF2F2" text="#991B1B" border="#FCA5A5"/>}
+              {t.recurrente && <Badge label="🔁 Mensual" bg="#DBEAFE" text="#1E40AF" border="#93C5FD"/>}
+              {t.origen==="reporte" && <Badge label="🔗 Reporte" bg="#FEF3C7" text="#92400E" border="#FCD34D"/>}
+              {t.limpieza && <Badge label="🧹 Limpieza" bg="#EDE9FE" text="#5B21B6" border="#C4B5FD"/>}
+              {t.fechaTrabajo && <Badge label={`📅 ${fmtDate(t.fechaTrabajo)}`} bg="#F5F3FF" text="#5B21B6" border="#C4B5FD"/>}
+            </div>
+            {/* Título */}
+            <p style={{margin:"0 0 5px",fontWeight:700,fontSize:15,color:C.text,lineHeight:1.3,
+              textDecoration: esComp ? "line-through" : "none"}}>{t.titulo}</p>
+            {/* Info rápida */}
+            <div style={{display:"flex",flexWrap:"wrap",gap:"10px 16px",fontSize:12,color:C.textMuted}}>
+              <span>🏢 <strong style={{color:C.text}}>{t.edificio}</strong> · {t.depto||"—"}</span>
+              <span>👤 <strong style={{color:C.text}}>{t.asignado}</strong></span>
+              {t.fecha && <span>📅 {fmtDate(t.fecha)}{t.fechaFin?` → ${fmtDate(t.fechaFin)}`:""}</span>}
+              {t.materiales && <span>🔧 {t.materiales}</span>}
+            </div>
+          </div>
+          {/* Acciones */}
+          <div style={{display:"flex",gap:5,flexShrink:0}}>
+            <button onClick={()=>onEdit(t)} title="Editar" style={{...btn("#F3F4F6","#374151","#E5E7EB"),padding:"6px 10px",fontSize:13,borderRadius:7}}>✏️</button>
+            <button onClick={()=>setOpen(!open)} title="Detalles" style={{...btn("#F3F4F6","#374151","#E5E7EB"),padding:"6px 10px",fontSize:13,borderRadius:7}}>{open?"▲":"▼"}</button>
+            <button onClick={()=>onDelete(t.id)} title="Eliminar" style={{...btn(C.dangerLight,C.danger,"#FCA5A5"),padding:"6px 10px",fontSize:13,borderRadius:7}}>🗑</button>
+          </div>
+        </div>
+        {foto && !open && (
+          <img src={foto} alt="" style={{marginTop:8,height:50,width:80,objectFit:"cover",borderRadius:6,border:`1px solid ${C.border}`,cursor:"zoom-in"}} onClick={()=>window.open(foto,"_blank")}/>
+        )}
+      </div>
+
+      {/* Panel expandible */}
+      {open && (
+        <div style={{borderTop:`1px solid ${C.border}`,padding:"12px 16px",background:"#FAFAF9"}}>
+          {t.descripcion && <p style={{fontSize:13,margin:"0 0 10px",color:C.textMuted,lineHeight:1.5}}>{t.descripcion}</p>}
+          {foto && <img src={foto} alt="foto" style={{marginBottom:10,maxWidth:"100%",maxHeight:200,objectFit:"cover",borderRadius:8,border:`1px solid ${C.border}`,cursor:"zoom-in",display:"block"}} onClick={()=>window.open(foto,"_blank")}/>}
+
+          {/* Comentario */}
+          <div style={{marginBottom:10}}>
+            <label style={{fontSize:11,fontWeight:600,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em",display:"block",marginBottom:4}}>💬 Comentario interno</label>
+            <textarea style={{...inp,resize:"vertical",fontSize:13,minHeight:56}} rows={2} value={com} onChange={e=>setCom(e.target.value)} placeholder="Notas internas..."/>
+            <button onClick={()=>onComentario(t.id,com)} style={{...btn(C.blue,"#fff",C.blue),marginTop:5,padding:"5px 13px",fontSize:12}}>💾 Guardar nota</button>
+          </div>
+
+          {/* Acciones de estado */}
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+            {t.estado!=="En curso"&&t.estado!=="Completada"&&(
+              <button onClick={()=>onIniciar(t)} style={btn("#1D4ED8","#fff","#1D4ED8")}>▶ Iniciar</button>
+            )}
+            {t.estado==="En curso"&&<>
+              <button onClick={()=>onEstado(t.id,"Completada")} style={btn("#059669","#fff","#059669")}>✔ Completar</button>
+              <button onClick={()=>onEstado(t.id,"Pausada")} style={btn(C.warnLight,C.warn,"#FCD34D")}>⏸ Pausar</button>
+            </>}
+            {t.estado==="Pausada"&&<button onClick={()=>onIniciar(t)} style={btn("#1D4ED8","#fff","#1D4ED8")}>▶ Reanudar</button>}
+            {t.estado==="Completada"&&<button onClick={()=>onEstado(t.id,"Pendiente")} style={btn("#F3F4F6",C.text,C.border)}>↩ Reabrir</button>}
+          </div>
+
+          {/* Historial de la tarea */}
+          {t.historial?.length>0 && (
+            <div style={{background:"#F3F4F6",borderRadius:8,padding:"8px 12px"}}>
+              <p style={{margin:"0 0 4px",fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em"}}>Registro de cambios</p>
+              {t.historial.map((h,i)=><p key={i} style={{margin:"2px 0",fontSize:11,color:C.textLight}}>• {h}</p>)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Formulario de tarea ───────────────────────────────────────────────────────
+function TareaForm({tarea, edificios, tipos, personal, onSave, onClose}){
+  const blank={titulo:"",edificio:"QDB",depto:"",tipo:"General",asignado:"Yo",urgencia:"Baja",
+    estado:"Pendiente",fechaCarga:TODAY,fecha:"",fechaFin:"",descripcion:"",materiales:"",
+    comentario:"",foto:null,limpieza:false,recurrente:false,huespedAlerta:false,historial:[]};
+  const [f,setF]=useState(tarea?{...tarea,fechaCarga:tarea.fechaCarga||TODAY,fecha:tarea.fecha||""}:blank);
+  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+  const deptos=edificios[f.edificio]||[];
+
+  return(
+    <div style={{display:"grid",gap:"1rem"}}>
+      <div>
+        <label style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em",display:"block",marginBottom:5}}>Título *</label>
+        <input style={inp} value={f.titulo} onChange={e=>set("titulo",e.target.value)} placeholder="Describí brevemente el trabajo a realizar"/>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0.75rem"}}>
+        {[
+          {lbl:"Edificio",k:"edificio",opts:Object.keys(edificios),onChange:e=>{set("edificio",e.target.value);set("depto","");}},
+        ].map(({lbl,k,opts,onChange})=>(
+          <div key={k}>
+            <label style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em",display:"block",marginBottom:5}}>{lbl}</label>
+            <select style={inp} value={f[k]} onChange={onChange||((e)=>set(k,e.target.value))}>
+              {opts.map(o=><option key={o}>{o}</option>)}
+            </select>
+          </div>
+        ))}
+        <div>
+          <label style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em",display:"block",marginBottom:5}}>Dpto / Sector</label>
+          <select style={inp} value={f.depto} onChange={e=>set("depto",e.target.value)}>
+            <option value="">— Seleccionar —</option>
+            {deptos.map(d=><option key={d}>{d}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em",display:"block",marginBottom:5}}>Tipo</label>
+          <select style={inp} value={f.tipo} onChange={e=>set("tipo",e.target.value)}>
+            {tipos.map(t=><option key={t}>{t}</option>)}
+          </select>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0.75rem"}}>
+        <div>
+          <label style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em",display:"block",marginBottom:5}}>Asignado a</label>
+          <select style={inp} value={f.asignado} onChange={e=>set("asignado",e.target.value)}>
+            {personal.map(p=><option key={p}>{p}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em",display:"block",marginBottom:5}}>Urgencia</label>
+          <select style={inp} value={f.urgencia} onChange={e=>set("urgencia",e.target.value)}>
+            {URGENCIAS.map(u=><option key={u.label}>{u.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em",display:"block",marginBottom:5}}>Estado</label>
+          <select style={inp} value={f.estado} onChange={e=>set("estado",e.target.value)}>
+            {ESTADOS.map(e=><option key={e}>{e}</option>)}
+          </select>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0.75rem"}}>
+        <div>
+          <label style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em",display:"block",marginBottom:5}}>📋 Fecha de carga</label>
+          <input type="date" style={{...inp,background:"#F9FAFB",color:C.textMuted}} value={f.fechaCarga} readOnly/>
+        </div>
+        <div>
+          <label style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em",display:"block",marginBottom:5}}>🔧 Inicio de tarea</label>
+          <input type="date" style={inp} value={f.fecha} onChange={e=>set("fecha",e.target.value)}/>
+        </div>
+        <div>
+          <label style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em",display:"block",marginBottom:5}}>✅ Fecha de fin</label>
+          <input type="date" style={inp} value={f.fechaFin} onChange={e=>set("fechaFin",e.target.value)}/>
+        </div>
+      </div>
+      <div>
+        <label style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em",display:"block",marginBottom:5}}>Materiales necesarios</label>
+        <input style={inp} value={f.materiales} onChange={e=>set("materiales",e.target.value)} placeholder="Ej: pintura blanca 1L, sellador..."/>
+      </div>
+      <div>
+        <label style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em",display:"block",marginBottom:5}}>Descripción / Notas</label>
+        <textarea style={{...inp,resize:"vertical"}} rows={3} value={f.descripcion} onChange={e=>set("descripcion",e.target.value)} placeholder="Detalles adicionales..."/>
+      </div>
+      <div>
+        <label style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em",display:"block",marginBottom:5}}>📷 Foto de referencia</label>
+        <input type="file" accept="image/*" capture="environment" onChange={e=>{const f=e.target.files[0];if(!f)return;resizePhoto(f,d=>set("foto",d));}} style={{...inp,padding:"7px",cursor:"pointer"}}/>
+        {f.foto && (
+          <div style={{marginTop:8,display:"flex",alignItems:"center",gap:10}}>
+            <img src={f.foto} alt="" style={{height:70,width:100,objectFit:"cover",borderRadius:8,border:`1px solid ${C.border}`}}/>
+            <button onClick={()=>set("foto",null)} style={{...btn(C.dangerLight,C.danger,"#FCA5A5"),padding:"5px 12px",fontSize:12}}>✕ Quitar</button>
+          </div>
+        )}
+      </div>
+      <div style={{display:"flex",gap:"1.5rem",flexWrap:"wrap",padding:"0.75rem 1rem",background:"#F9FAFB",borderRadius:10,border:`1px solid ${C.border}`}}>
+        {[["limpieza","🧹 Requiere limpieza post-trabajo"],["recurrente","🔁 Tarea mensual"],["huespedAlerta","⚠️ Hay huésped en el depto"]].map(([k,lbl])=>(
+          <label key={k} style={{display:"flex",alignItems:"center",gap:8,fontSize:13,cursor:"pointer",fontWeight:500}}>
+            <input type="checkbox" checked={!!f[k]} onChange={e=>set(k,e.target.checked)} style={{width:16,height:16,accentColor:C.blue}}/>{lbl}
+          </label>
+        ))}
+      </div>
+      <div style={{display:"flex",gap:"0.75rem",justifyContent:"flex-end",paddingTop:"0.5rem",borderTop:`1px solid ${C.border}`}}>
+        <button onClick={onClose} style={btn()}>Cancelar</button>
+        <button onClick={()=>{if(!f.titulo.trim())return;onSave(f);onClose();}}
+          style={{...btn(C.blue,"#fff",C.blue),padding:"10px 24px",fontSize:15,fontWeight:700}}>
+          {tarea?"Guardar cambios":"✚ Crear tarea"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Modal Iniciar ─────────────────────────────────────────────────────────────
+function ModalIniciar({tarea,onConfirm,onClose}){
+  const [fecha,setFecha]=useState(tarea.fecha||TODAY);
+  return(
     <div onClick={e=>{if(e.target===e.currentTarget)onClose();}}
-      style={{position:"fixed",inset:0,background:"rgba(10,10,20,0.65)",zIndex:3500,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
-      <div style={{background:"#fff",borderRadius:18,padding:"2rem",width:"100%",maxWidth:380,boxShadow:"0 12px 48px rgba(0,0,0,0.25)"}}>
-        <h3 style={{margin:"0 0 1rem",fontSize:16,fontWeight:600}}>▶ Iniciar tarea</h3>
-        <p style={{margin:"0 0 0.75rem",fontSize:14,color:"#555"}}>¿Desde qué fecha comienza el trabajo?</p>
-        <label style={S.label}>Fecha de inicio</label>
-        <input type="date" style={{...S.input,marginBottom:"1.25rem"}} value={fecha} onChange={e=>setFecha(e.target.value)}/>
+      style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:3500,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
+      <div style={{background:"#fff",borderRadius:16,padding:"1.5rem",width:"100%",maxWidth:360,boxShadow:C.shadowLg}}>
+        <h3 style={{margin:"0 0 0.75rem",fontSize:16,fontWeight:700}}>▶ Iniciar tarea</h3>
+        <p style={{margin:"0 0 0.75rem",fontSize:13,color:C.textMuted}}>"{tarea.titulo}"</p>
+        <label style={{fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em",display:"block",marginBottom:5}}>Fecha de inicio</label>
+        <input type="date" style={{...inp,marginBottom:"1rem"}} value={fecha} onChange={e=>setFecha(e.target.value)}/>
         <div style={{display:"flex",gap:"0.75rem",justifyContent:"flex-end"}}>
-          <button onClick={onClose} style={S.btn()}>Cancelar</button>
-          <button onClick={()=>{onConfirm(fecha);onClose();}} style={{...S.btn("#185FA5","#fff"),padding:"9px 22px"}}>▶ Iniciar</button>
+          <button onClick={onClose} style={btn()}>Cancelar</button>
+          <button onClick={()=>{onConfirm(fecha);onClose();}} style={{...btn(C.blue,"#fff",C.blue),padding:"9px 22px"}}>▶ Iniciar</button>
         </div>
       </div>
     </div>
   );
 }
 
+// ── Modal Depto ───────────────────────────────────────────────────────────────
 function ModalDepto({edificio,depto,tareas,onClose}){
   const todas=tareas.filter(t=>t.edificio===edificio&&t.depto===depto);
   const activas=todas.filter(t=>t.estado!=="Completada");
   const comp=todas.filter(t=>t.estado==="Completada");
   return(
     <div onClick={e=>{if(e.target===e.currentTarget)onClose();}}
-      style={{position:"fixed",inset:0,background:"rgba(8,20,45,0.82)",zIndex:3000,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
-      <div style={{background:"#1C2B45",borderRadius:20,padding:"2rem",width:"100%",maxWidth:620,maxHeight:"88vh",overflowY:"auto",boxShadow:"0 16px 64px rgba(0,0,0,0.6)",border:"2px solid #2E4A6E"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1.5rem"}}>
+      style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:3000,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem",backdropFilter:"blur(2px)"}}>
+      <div style={{background:"#1E293B",borderRadius:20,padding:"1.5rem",width:"100%",maxWidth:580,maxHeight:"88vh",overflowY:"auto",boxShadow:C.shadowLg}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1.25rem"}}>
           <div>
-            <p style={{margin:0,fontSize:20,fontWeight:700,color:"#fff"}}>🏠 {edificio} · Dpto {depto}</p>
-            <p style={{margin:0,fontSize:13,color:"#8BAFD4",marginTop:2}}>{todas.length} registro{todas.length!==1?"s":""} en total</p>
+            <p style={{margin:0,fontSize:19,fontWeight:700,color:"#fff"}}>🏠 {edificio} · Dpto {depto}</p>
+            <p style={{margin:"2px 0 0",fontSize:12,color:"#94A3B8"}}>{todas.length} registro{todas.length!==1?"s":""} totales</p>
           </div>
-          <button onClick={onClose} style={{background:"rgba(255,255,255,0.1)",border:"none",borderRadius:10,width:36,height:36,fontSize:18,cursor:"pointer",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+          <button onClick={onClose} style={{background:"rgba(255,255,255,0.1)",border:"none",borderRadius:8,width:32,height:32,fontSize:16,cursor:"pointer",color:"#fff"}}>✕</button>
         </div>
         {activas.length>0&&(
-          <div style={{marginBottom:"1.5rem"}}>
-            <p style={{margin:"0 0 0.75rem",fontSize:12,fontWeight:700,color:"#F09595",textTransform:"uppercase",letterSpacing:"0.06em"}}>🔴 Activas ({activas.length})</p>
+          <div style={{marginBottom:"1.25rem"}}>
+            <p style={{margin:"0 0 0.6rem",fontSize:11,fontWeight:700,color:"#FCA5A5",textTransform:"uppercase",letterSpacing:"0.06em"}}>🔴 Activas ({activas.length})</p>
             {activas.map(t=>{
-              const urg=urgStyle(t.urgencia),est=estStyle(t.estado);
+              const urg=urgStyle(t.urgencia),est=estColor(t.estado);
               return(
-                <div key={t.id} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:12,padding:"0.875rem 1rem",marginBottom:"0.5rem",borderLeft:`4px solid ${urg.border}`}}>
+                <div key={t.id} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:10,padding:"10px 12px",marginBottom:6,borderLeft:`3px solid ${urg.dot}`}}>
                   <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
                     <p style={{margin:0,fontWeight:600,fontSize:14,color:"#fff"}}>{t.titulo}</p>
-                    <div style={{display:"flex",gap:6}}>
-                      <span style={{...S.tag(urg.bg,urg.text,urg.border),fontSize:11}}>{t.urgencia}</span>
-                      <span style={{...S.tag(est.bg,est.text,est.border),fontSize:11}}>{t.estado}</span>
+                    <div style={{display:"flex",gap:5}}>
+                      <Badge label={t.urgencia} bg={urg.bg} text={urg.text} border={urg.border}/>
+                      <Badge label={t.estado} bg={est.bg} text={est.text} border={est.border}/>
                     </div>
                   </div>
-                  <p style={{margin:"4px 0 0",fontSize:12,color:"#8BAFD4"}}>🔧 {t.tipo} | 📅 {FMT_DATE(t.fecha)} | 👤 {t.asignado}</p>
-                  {(t.fotoReporte||t.foto)&&<img src={t.fotoReporte||t.foto} alt="foto" style={{marginTop:8,maxWidth:180,borderRadius:8,cursor:"zoom-in"}} onClick={()=>window.open(t.fotoReporte||t.foto,"_blank")}/>}
+                  <p style={{margin:"4px 0 0",fontSize:11,color:"#94A3B8"}}>🔧 {t.tipo} · 📅 {fmtDate(t.fecha)} · 👤 {t.asignado}</p>
                 </div>
               );
             })}
@@ -207,232 +434,51 @@ function ModalDepto({edificio,depto,tareas,onClose}){
         )}
         {comp.length>0&&(
           <div>
-            <p style={{margin:"0 0 0.75rem",fontSize:12,fontWeight:700,color:"#97C459",textTransform:"uppercase",letterSpacing:"0.06em"}}>✅ Historial ({comp.length})</p>
+            <p style={{margin:"0 0 0.6rem",fontSize:11,fontWeight:700,color:"#6EE7B7",textTransform:"uppercase",letterSpacing:"0.06em"}}>✅ Historial ({comp.length})</p>
             {comp.map(t=>(
-              <div key={t.id} style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:12,padding:"0.75rem 1rem",marginBottom:"0.5rem",borderLeft:"4px solid #97C459"}}>
-                <p style={{margin:0,fontWeight:500,fontSize:14,color:"#b0c8e0",textDecoration:"line-through",opacity:0.8}}>{t.titulo}</p>
-                <p style={{margin:"4px 0 0",fontSize:12,color:"#6A8FAF"}}>🔧 {t.tipo} | 📅 {FMT_DATE(t.fecha)}{t.fechaFin?` → ${FMT_DATE(t.fechaFin)}`:""} | 👤 {t.asignado}</p>
+              <div key={t.id} style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,padding:"8px 12px",marginBottom:5,borderLeft:"3px solid #10B981"}}>
+                <p style={{margin:0,fontWeight:500,fontSize:13,color:"#94A3B8",textDecoration:"line-through"}}>{t.titulo}</p>
+                <p style={{margin:"3px 0 0",fontSize:11,color:"#64748B"}}>🔧 {t.tipo} · 📅 {fmtDate(t.fecha)}{t.fechaFin?` → ${fmtDate(t.fechaFin)}`:""}</p>
               </div>
             ))}
           </div>
         )}
-        {todas.length===0&&<div style={{textAlign:"center",padding:"2.5rem 0",color:"#8BAFD4"}}><p style={{fontSize:36}}>🏠</p><p style={{fontSize:15,marginTop:8}}>Sin registros</p></div>}
+        {todas.length===0&&<div style={{textAlign:"center",padding:"2.5rem 0",color:"#64748B"}}><p style={{fontSize:36}}>🏠</p><p>Sin registros</p></div>}
       </div>
     </div>
   );
 }
 
-function OrigenBadge({origen}){
-  if(!origen) return null;
-  const cfg={reporte:{bg:"#FFF3E0",color:"#E65100",border:"#FFB74D",label:"🔗 Desde Reporte"},limpieza:{bg:"#E8F5E9",color:"#1B5E20",border:"#66BB6A",label:"🧹 Post-mantenimiento"}};
-  const c=cfg[origen]; if(!c) return null;
-  return <span style={{...S.tag(c.bg,c.color,c.border),fontSize:11}}>{c.label}</span>;
-}
+// ── Vista Semanal ─────────────────────────────────────────────────────────────
+function VistaSemanal({tareas, onMoverTarea, onEdit, onQuitarDia, onEstado, onIniciar}){
+  const [weekOff, setWeekOff] = useState(0);
+  const [dragging, setDragging] = useState(null);
+  const [editInline, setEditInline] = useState(null);
+  const weekDays = getWeekDays(weekOff);
+  const rangoLabel = `${fmtDate(weekDays[0])} — ${fmtDate(weekDays[6])}`;
 
-function TareaCard({t,onEdit,onEstado,onDelete,onComentario,onIniciar}){
-  const urg=urgStyle(t.urgencia),est=estStyle(t.estado);
-  const [open,setOpen]=useState(false);
-  const [com,setCom]=useState(t.comentario||"");
-  const foto=t.foto||t.fotoReporte||null;
+  function onDragStart(e,t){ setDragging(t); e.dataTransfer.effectAllowed="move"; }
+  function onDrop(e,iso){ e.preventDefault(); if(!dragging)return; onMoverTarea(dragging.id,iso); setDragging(null); }
+  function onDragOver(e){ e.preventDefault(); }
 
-  // Distintivo de día asignado
-  const tienesDia = !!t.fechaTrabajo;
-
-  return(
-    <div style={{
-      ...S.card,
-      borderLeft:`5px solid ${urg.border}`,
-      background: tienesDia ? "#F5F0FF" : "#fff",
-      border: tienesDia ? "1.5px solid #C084FC" : "1px solid #e2e0d8",
-    }}>
-      {tienesDia && (
-        <div style={{marginBottom:6,display:"flex",alignItems:"center",gap:6}}>
-          <span style={{...S.tag("#F3E8FF","#6B21A8","#C084FC"),fontSize:11}}>📅 Asignada: {FMT_DATE(t.fechaTrabajo)}</span>
-        </div>
-      )}
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:6}}>
-            {t.huespedAlerta&&<span style={S.tag("#FAECE7","#993C1D","#F5C4B3")}>⚠ Huésped</span>}
-            <span style={S.tag(urg.bg,urg.text,urg.border)}>{t.urgencia}</span>
-            <span style={S.tag(est.bg,est.text,est.border)}>{t.estado}</span>
-            <span style={S.tag("#F1EFE8","#5F5E5A","#B4B2A9")}>{t.tipo}</span>
-            {t.recurrente&&<span style={S.tag("#E6F1FB","#185FA5","#85B7EB")}>🔁 Mensual</span>}
-            {t.limpieza&&<span style={S.tag("#EEEDFE","#534AB7","#AFA9EC")}>🧹 Limpieza</span>}
-            <OrigenBadge origen={t.origen}/>
-          </div>
-          <p style={{margin:"0 0 3px",fontWeight:600,fontSize:16}}>{t.titulo}</p>
-          <p style={{margin:0,fontSize:13,color:"#888"}}>
-            🏢 {t.edificio} · {t.depto||"—"} | 👤 {t.asignado} | 📅 {FMT_DATE(t.fecha)}{t.fechaFin?` → ${FMT_DATE(t.fechaFin)}`:""}
-          </p>
-          {t.fechaCarga&&<p style={{margin:"2px 0 0",fontSize:11,color:"#bbb"}}>Cargada: {FMT_DATE(t.fechaCarga)}</p>}
-          {t.materiales&&<p style={{margin:"2px 0 0",fontSize:13,color:"#888"}}>🔧 {t.materiales}</p>}
-          {foto&&<img src={foto} alt="foto" style={{marginTop:8,maxWidth:160,borderRadius:8,border:"1px solid #e2e0d8",cursor:"zoom-in",display:"block"}} onClick={()=>window.open(foto,"_blank")}/>}
-        </div>
-        <div style={{display:"flex",gap:6,flexShrink:0}}>
-          <button onClick={()=>setOpen(!open)} style={{...S.btn(),padding:"6px 10px"}}>{open?"▲":"▼"}</button>
-          <button onClick={()=>onEdit(t)} style={{...S.btn(),padding:"6px 10px"}}>✏️</button>
-          <button onClick={()=>onDelete(t.id)} style={{...S.btn("#FCEBEB","#A32D2D"),padding:"6px 10px",border:"1px solid #F09595"}}>🗑️</button>
-        </div>
-      </div>
-      {open&&(
-        <div style={{marginTop:"0.75rem",paddingTop:"0.75rem",borderTop:"1px solid #ebe9e2"}}>
-          {t.descripcion&&<p style={{fontSize:14,margin:"0 0 0.75rem",color:"#666"}}>{t.descripcion}</p>}
-          <div style={{marginBottom:"0.75rem"}}>
-            <label style={S.label}>💬 Comentario interno</label>
-            <textarea style={{...S.input,resize:"vertical",fontSize:13}} rows={2} value={com} onChange={e=>setCom(e.target.value)} placeholder="Notas internas..."/>
-            <button onClick={()=>onComentario(t.id,com)} style={{...S.btn("#185FA5","#fff"),marginTop:6,padding:"5px 14px",fontSize:12}}>💾 Guardar</button>
-          </div>
-          <div style={{display:"flex",gap:"0.5rem",flexWrap:"wrap",marginBottom:"0.75rem"}}>
-            {/* Iniciar — abre modal para elegir fecha de inicio */}
-            {t.estado!=="En curso"&&t.estado!=="Completada"&&(
-              <button onClick={()=>onIniciar(t)} style={S.btn("#185FA5","#fff")}>▶ Iniciar</button>
-            )}
-            {t.estado==="En curso"&&<>
-              <button onClick={()=>onEstado(t.id,"Completada")} style={S.btn("#3B6D11","#fff")}>✔ Finalizar</button>
-              <button onClick={()=>onEstado(t.id,"Pausada")} style={S.btn("#854F0B","#fff")}>⏸ Pausar</button>
-            </>}
-            {t.estado==="Pausada"&&<button onClick={()=>onIniciar(t)} style={S.btn("#185FA5","#fff")}>▶ Reanudar</button>}
-            {t.estado==="Completada"&&<button onClick={()=>onEstado(t.id,"Pendiente")} style={S.btn()}>↩ Reabrir</button>}
-          </div>
-          {t.historial?.length>0&&(
-            <div style={{background:"#f7f6f2",borderRadius:8,padding:"0.5rem 0.75rem"}}>
-              <p style={{margin:"0 0 4px",fontSize:12,fontWeight:500,color:"#888"}}>REGISTRO</p>
-              {t.historial.map((h,i)=><p key={i} style={{margin:"2px 0",fontSize:12,color:"#aaa"}}>• {h}</p>)}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function TareaForm({tarea,edificios,tipos,personal,onSave,onClose}){
-  const blank={titulo:"",edificio:"QDB",depto:"",tipo:"General",asignado:"Yo",urgencia:"Baja",
-    estado:"Pendiente",fechaCarga:TODAY,fecha:"",fechaFin:"",descripcion:"",materiales:"",comentario:"",
-    foto:null,limpieza:false,recurrente:false,huespedAlerta:false,historial:[]};
-  const [f,setF]=useState(tarea?{...tarea,fechaCarga:tarea.fechaCarga||tarea.fecha||TODAY,fecha:tarea.fecha||""}:blank);
-  const set=(k,v)=>setF(p=>({...p,[k]:v}));
-  const deptos=edificios[f.edificio]||[];
-  function handleFoto(e){const file=e.target.files[0];if(!file)return;resizePhoto(file,data=>set("foto",data));}
-  return(
-    <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1.5rem"}}>
-        <h2 style={{margin:0,fontSize:18,fontWeight:500}}>{tarea?"Editar tarea":"Nueva tarea"}</h2>
-        <button onClick={onClose} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#888"}}>✕</button>
-      </div>
-      <div style={{display:"grid",gap:"1rem"}}>
-        <div><label style={S.label}>Título *</label>
-          <input style={S.input} value={f.titulo} onChange={e=>set("titulo",e.target.value)} placeholder="Descripción breve"/>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"1rem"}}>
-          <div><label style={S.label}>Edificio</label>
-            <select style={S.input} value={f.edificio} onChange={e=>{set("edificio",e.target.value);set("depto","");}}>
-              {Object.keys(edificios).map(b=><option key={b}>{b}</option>)}
-            </select>
-          </div>
-          <div><label style={S.label}>Dpto / Sector</label>
-            <select style={S.input} value={f.depto} onChange={e=>set("depto",e.target.value)}>
-              <option value="">— Seleccionar —</option>
-              {deptos.map(d=><option key={d}>{d}</option>)}
-            </select>
-          </div>
-          <div><label style={S.label}>Tipo</label>
-            <select style={S.input} value={f.tipo} onChange={e=>set("tipo",e.target.value)}>
-              {tipos.map(t=><option key={t}>{t}</option>)}
-            </select>
-          </div>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"1rem"}}>
-          <div><label style={S.label}>Asignado a</label>
-            <select style={S.input} value={f.asignado} onChange={e=>set("asignado",e.target.value)}>
-              {personal.map(p=><option key={p}>{p}</option>)}
-            </select>
-          </div>
-          <div><label style={S.label}>Urgencia</label>
-            <select style={S.input} value={f.urgencia} onChange={e=>set("urgencia",e.target.value)}>
-              {URGENCIAS.map(u=><option key={u.label}>{u.label}</option>)}
-            </select>
-          </div>
-          <div><label style={S.label}>Estado</label>
-            <select style={S.input} value={f.estado} onChange={e=>set("estado",e.target.value)}>
-              {ESTADOS.map(e=><option key={e}>{e}</option>)}
-            </select>
-          </div>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"1rem"}}>
-          <div><label style={S.label}>📋 Fecha de carga</label>
-            <input type="date" style={{...S.input,background:"#f7f6f2",color:"#aaa"}} value={f.fechaCarga} readOnly/>
-            <p style={{margin:"2px 0 0",fontSize:11,color:"#aaa"}}>Automática</p>
-          </div>
-          <div><label style={S.label}>🔧 Fecha inicio de tarea</label>
-            <input type="date" style={S.input} value={f.fecha} onChange={e=>set("fecha",e.target.value)}/>
-          </div>
-          <div><label style={S.label}>✅ Fecha de fin (opcional)</label>
-            <input type="date" style={S.input} value={f.fechaFin} onChange={e=>set("fechaFin",e.target.value)}/>
-          </div>
-        </div>
-        <div><label style={S.label}>Materiales</label>
-          <input style={S.input} value={f.materiales} onChange={e=>set("materiales",e.target.value)} placeholder="Ej: pintura blanca..."/>
-        </div>
-        <div><label style={S.label}>Descripción / Notas</label>
-          <textarea style={{...S.input,resize:"vertical"}} rows={2} value={f.descripcion} onChange={e=>set("descripcion",e.target.value)}/>
-        </div>
-        <div><label style={S.label}>💬 Comentario interno</label>
-          <textarea style={{...S.input,resize:"vertical"}} rows={2} value={f.comentario||""} onChange={e=>set("comentario",e.target.value)} placeholder="Notas internas..."/>
-        </div>
-        <div>
-          <label style={S.label}>📷 Foto de referencia</label>
-          <input type="file" accept="image/*" capture="environment" onChange={handleFoto} style={{...S.input,padding:"6px",cursor:"pointer"}}/>
-          {f.foto&&(
-            <div style={{marginTop:8,display:"flex",alignItems:"center",gap:10}}>
-              <img src={f.foto} alt="preview" style={{maxWidth:120,borderRadius:8,border:"1px solid #dddbd3"}}/>
-              <button onClick={()=>set("foto",null)} style={{...S.btn("#FCEBEB","#A32D2D"),fontSize:12,padding:"4px 10px",border:"1px solid #F09595"}}>✕ Quitar</button>
-            </div>
-          )}
-        </div>
-        <div style={{display:"flex",gap:"2rem",flexWrap:"wrap",padding:"0.75rem 1rem",background:"#f7f6f2",borderRadius:10}}>
-          {[["limpieza","🧹 Requiere limpieza"],["recurrente","🔁 Mensual"],["huespedAlerta","⚠️ Huésped"]].map(([k,lbl])=>(
-            <label key={k} style={{display:"flex",alignItems:"center",gap:8,fontSize:14,cursor:"pointer"}}>
-              <input type="checkbox" checked={!!f[k]} onChange={e=>set(k,e.target.checked)} style={{width:16,height:16}}/>{lbl}
-            </label>
-          ))}
-        </div>
-      </div>
-      <div style={{display:"flex",gap:"0.75rem",marginTop:"1.5rem",justifyContent:"flex-end"}}>
-        <button onClick={onClose} style={S.btn()}>Cancelar</button>
-        <button onClick={()=>{if(!f.titulo.trim())return;onSave(f);onClose();}} style={{...S.btn("#185FA5","#fff"),padding:"9px 22px",fontSize:15}}>
-          {tarea?"Guardar cambios":"Crear tarea"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
-  const [weekOff,setWeekOff]=useState(0);
-  const [arrastrando,setArrastrando]=useState(null);
-  const weekDays=getWeekDays(TODAY,weekOff);
-  const labelSem=`${FMT_DATE(weekDays[0])} — ${FMT_DATE(weekDays[6])}`;
-
-  function onDragStart(e,tarea){setArrastrando(tarea);e.dataTransfer.effectAllowed="move";}
-  function onDrop(e,iso){e.preventDefault();if(!arrastrando)return;onMoverTarea(arrastrando.id,iso);setArrastrando(null);}
-  function onDragOver(e){e.preventDefault();}
-
+  // Mini card dentro del calendario
   function MiniCard({t}){
-    const urg=urgStyle(t.urgencia);
-    const esObra=t.asignado==="Obra";
+    const urg = urgStyle(t.urgencia);
+    const est = estColor(t.estado);
     return(
       <div draggable onDragStart={e=>onDragStart(e,t)}
-        style={{background:esObra?"#2D1B69":urg.bg,border:`1.5px solid ${esObra?"#7C5CBF":urg.border}`,borderRadius:8,padding:"5px 7px",marginBottom:4,cursor:"grab",fontSize:11}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:4}}>
+        style={{background:"#fff",border:`1px solid ${C.border}`,borderLeft:`3px solid ${urg.dot}`,borderRadius:8,padding:"6px 8px",marginBottom:4,cursor:"grab",fontSize:11}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:3}}>
           <div style={{flex:1,minWidth:0}}>
-            <p style={{margin:"0 0 1px",fontWeight:600,color:esObra?"#C9B8FF":urg.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.titulo}</p>
-            <p style={{margin:0,color:esObra?"#A084E8":urg.text,opacity:0.85,fontSize:10}}>{t.edificio} · {t.depto}</p>
+            <p style={{margin:"0 0 1px",fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:11}}>{t.titulo}</p>
+            <p style={{margin:0,color:C.textMuted,fontSize:10}}>{t.edificio}·{t.depto}</p>
+            <span style={pill(est.bg,est.text,est.border)}>{t.estado}</span>
           </div>
-          <div style={{display:"flex",gap:2,flexShrink:0}}>
-            <button title="Editar" onClick={e=>{e.stopPropagation();onEdit(t);}} style={{background:"rgba(255,255,255,0.25)",border:"none",borderRadius:5,width:20,height:20,fontSize:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✏️</button>
-            {t.fechaTrabajo&&<button title="Quitar día" onClick={e=>{e.stopPropagation();onQuitarDia(t.id);}} style={{background:"rgba(255,255,255,0.25)",border:"none",borderRadius:5,width:20,height:20,fontSize:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>↩</button>}
+          <div style={{display:"flex",flexDirection:"column",gap:2,flexShrink:0}}>
+            <button onClick={e=>{e.stopPropagation();setEditInline(t);}} title="Editar" style={{background:C.blueLight,border:"none",borderRadius:4,width:18,height:18,fontSize:9,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✏️</button>
+            {t.estado==="En curso"&&<button onClick={e=>{e.stopPropagation();onEstado(t.id,"Completada");}} title="Completar" style={{background:C.successLight,border:"none",borderRadius:4,width:18,height:18,fontSize:9,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✔</button>}
+            {(t.estado==="Pendiente"||t.estado==="Asignada")&&<button onClick={e=>{e.stopPropagation();onIniciar(t);}} title="Iniciar" style={{background:C.blueLight,border:"none",borderRadius:4,width:18,height:18,fontSize:9,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>▶</button>}
+            {t.fechaTrabajo&&<button onClick={e=>{e.stopPropagation();onQuitarDia(t.id);}} title="Quitar día" style={{background:"#F3F4F6",border:"none",borderRadius:4,width:18,height:18,fontSize:9,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>↩</button>}
           </div>
         </div>
       </div>
@@ -441,174 +487,181 @@ function VistaSemanal({tareas,onMoverTarea,onEdit,onQuitarDia}){
 
   function DiaCol({iso}){
     const esHoy=iso===TODAY;
-    // Solo tareas con fechaTrabajo en este día
-    const tsAsig=tareas.filter(t=>t.estado!=="Completada"&&t.fechaTrabajo===iso);
-    const obra=tsAsig.filter(t=>t.asignado==="Obra");
-    const resto=tsAsig.filter(t=>t.asignado!=="Obra");
+    const ts=tareas.filter(t=>t.estado!=="Completada"&&t.fechaTrabajo===iso);
+    const d=new Date(iso+"T12:00:00");
     return(
       <div onDragOver={onDragOver} onDrop={e=>onDrop(e,iso)}
-        style={{minHeight:180,background:esHoy?"#E6F1FB":"#f7f6f2",border:`2px ${esHoy?"solid #185FA5":"dashed #dddbd3"}`,borderRadius:12,padding:"0.5rem",transition:"background 0.15s"}}>
-        <p style={{margin:"0 0 6px",fontSize:12,fontWeight:700,color:esHoy?"#185FA5":"#888",textAlign:"center"}}>
-          {DIAS_CORTO[new Date(iso+"T12:00:00").getDay()]}<br/>
-          <span style={{fontSize:11,fontWeight:400}}>{FMT_DATE(iso)}</span>
-        </p>
-        {resto.length>0&&<div style={{marginBottom:4}}>
-          <p style={{margin:"0 0 3px",fontSize:9,fontWeight:700,color:"#185FA5",textTransform:"uppercase",borderBottom:"1px solid #c5d9ef",paddingBottom:2}}>🔧 Manten.</p>
-          {resto.map(t=><MiniCard key={t.id} t={t}/>)}
-        </div>}
-        {obra.length>0&&<div>
-          <p style={{margin:"0 0 3px",fontSize:9,fontWeight:700,color:"#9B7DD4",textTransform:"uppercase",borderBottom:"1px solid #7C5CBF",paddingBottom:2}}>🏗️ Obra</p>
-          {obra.map(t=><MiniCard key={t.id} t={t}/>)}
-        </div>}
-        {tsAsig.length===0&&<p style={{fontSize:11,color:"#bbb",textAlign:"center",marginTop:8}}>Sin tareas</p>}
+        style={{minHeight:160,background:esHoy?"#EFF6FF":"#F9FAFB",border:`2px ${esHoy?"solid "+C.blue:"dashed #D1D5DB"}`,borderRadius:12,padding:"8px 6px",transition:"all 0.15s"}}>
+        <div style={{textAlign:"center",marginBottom:8}}>
+          <p style={{margin:0,fontSize:11,fontWeight:700,color:esHoy?C.blue:C.textMuted,textTransform:"uppercase"}}>{DIAS[d.getDay()]}</p>
+          <p style={{margin:0,fontSize:13,fontWeight:esHoy?700:400,color:esHoy?C.blue:C.text}}>{d.getDate()}</p>
+        </div>
+        {ts.map(t=><MiniCard key={t.id} t={t}/>)}
+        {ts.length===0&&<p style={{fontSize:10,color:C.textLight,textAlign:"center",marginTop:8}}>Sin tareas</p>}
       </div>
     );
   }
 
-  // Pendientes SIN fechaTrabajo asignada (no se muestran las que ya tienen día)
-  const sinDia=tareas.filter(t=>t.estado!=="Completada"&&!t.fechaTrabajo);
-  const sinDiaResto=sinDia.filter(t=>t.asignado!=="Obra");
-  const sinDiaObra=sinDia.filter(t=>t.asignado==="Obra");
+  const sinDia=sortDesc(tareas.filter(t=>t.estado!=="Completada"&&!t.fechaTrabajo));
 
   return(
     <div>
-      <div style={{display:"flex",alignItems:"center",gap:"1rem",marginBottom:"1.25rem",flexWrap:"wrap"}}>
-        <button onClick={()=>setWeekOff(o=>o-1)} style={S.btn()}>◀</button>
-        <p style={{margin:0,fontWeight:500,fontSize:15,flex:1,textAlign:"center"}}>📅 {labelSem}</p>
-        <button onClick={()=>setWeekOff(0)} style={{...S.btn(weekOff===0?"#185FA5":undefined,weekOff===0?"#fff":undefined),fontSize:13,padding:"6px 14px"}}>Hoy</button>
-        <button onClick={()=>setWeekOff(o=>o+1)} style={S.btn()}>▶</button>
+      {editInline&&(
+        <Modal onClose={()=>setEditInline(null)} title={`Editar: ${editInline.titulo}`} wide>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:"1rem"}}>
+            {editInline.estado!=="En curso"&&editInline.estado!=="Completada"&&(
+              <button onClick={()=>{onIniciar(editInline);setEditInline(null);}} style={btn("#1D4ED8","#fff","#1D4ED8")}>▶ Iniciar</button>
+            )}
+            {editInline.estado==="En curso"&&<>
+              <button onClick={()=>{onEstado(editInline.id,"Completada");setEditInline(null);}} style={btn("#059669","#fff","#059669")}>✔ Completar</button>
+              <button onClick={()=>{onEstado(editInline.id,"Pausada");setEditInline(null);}} style={btn(C.warnLight,C.warn,"#FCD34D")}>⏸ Pausar</button>
+            </>}
+            {editInline.estado==="Pausada"&&<button onClick={()=>{onIniciar(editInline);setEditInline(null);}} style={btn("#1D4ED8","#fff","#1D4ED8")}>▶ Reanudar</button>}
+          </div>
+          <p style={{margin:"0 0 0.5rem",fontSize:13,color:C.textMuted}}>Para editar todos los campos, usá el botón ✏️ en la solapa Tareas.</p>
+        </Modal>
+      )}
+      {/* Controles semana */}
+      <div style={{display:"flex",alignItems:"center",gap:"0.75rem",marginBottom:"1rem"}}>
+        <button onClick={()=>setWeekOff(o=>o-1)} style={{...btn(),padding:"7px 14px"}}>◀</button>
+        <div style={{flex:1,textAlign:"center"}}>
+          <p style={{margin:0,fontWeight:700,fontSize:15,color:C.text}}>{rangoLabel}</p>
+        </div>
+        <button onClick={()=>setWeekOff(0)} style={{...btn(weekOff===0?C.blue:"#fff",weekOff===0?"#fff":C.text,weekOff===0?C.blue:C.border),padding:"7px 14px",fontSize:12}}>Hoy</button>
+        <button onClick={()=>setWeekOff(o=>o+1)} style={{...btn(),padding:"7px 14px"}}>▶</button>
       </div>
-      <div style={{background:"#fff8e1",border:"1px solid #FFE082",borderRadius:12,padding:"0.75rem 1rem",marginBottom:"1rem",fontSize:13,color:"#795548"}}>
-        💡 Arrastrá las tareas hacia el día. ✏️ edita, ↩ quita el día asignado.
+      <div style={{background:"#FFFBEB",border:"1px solid #FCD34D",borderRadius:10,padding:"8px 14px",marginBottom:"1rem",fontSize:12,color:"#92400E",display:"flex",alignItems:"center",gap:6}}>
+        💡 Arrastrá tarjetas al día deseado. Usá los botones ▶ ✔ ✏️ para gestionar desde acá.
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:6,marginBottom:"1.5rem"}}>
+      {/* Grid semana */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:5,marginBottom:"1.5rem"}}>
         {weekDays.map(iso=><DiaCol key={iso} iso={iso}/>)}
       </div>
-      <div>
-        <p style={{margin:"0 0 0.75rem",fontWeight:600,fontSize:14,color:"#555"}}>📋 Pendientes sin día asignado ({sinDia.length})</p>
-        {sinDiaResto.length>0&&<div style={{marginBottom:"0.75rem"}}>
-          <p style={{margin:"0 0 0.5rem",fontSize:12,fontWeight:600,color:"#185FA5"}}>🔧 Mantenimiento ({sinDiaResto.length})</p>
-          <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-            {sinDiaResto.map(t=>{
+
+      {/* Sin día asignado */}
+      <div style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:14,padding:"1rem",boxShadow:C.shadow}}>
+        <p style={{margin:"0 0 0.75rem",fontWeight:700,fontSize:14,color:C.text}}>📋 Sin día asignado ({sinDia.length})</p>
+        {sinDia.length===0
+          ? <p style={{fontSize:13,color:C.textMuted}}>¡Todas las tareas tienen día asignado! 👍</p>
+          : <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+            {sinDia.map(t=>{
               const urg=urgStyle(t.urgencia);
               return(
                 <div key={t.id} draggable onDragStart={e=>onDragStart(e,t)}
-                  style={{background:urg.bg,border:`1px solid ${urg.border}`,borderRadius:8,padding:"6px 10px",cursor:"grab",fontSize:12,maxWidth:200}}>
-                  <div style={{display:"flex",justifyContent:"space-between",gap:4}}>
-                    <div>
-                      <p style={{margin:"0 0 2px",fontWeight:600,color:urg.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:150}}>{t.titulo}</p>
-                      <p style={{margin:0,color:urg.text,opacity:0.8,fontSize:11}}>{t.edificio} · {t.depto}</p>
+                  style={{background:"#fff",border:`1.5px solid ${urg.border}`,borderLeft:`4px solid ${urg.dot}`,borderRadius:10,padding:"8px 12px",cursor:"grab",minWidth:160,maxWidth:220,boxShadow:C.shadow}}>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:4,alignItems:"flex-start"}}>
+                    <div style={{flex:1}}>
+                      <Badge label={t.urgencia} bg={urg.bg} text={urg.text} border={urg.border}/>
+                      <p style={{margin:"4px 0 2px",fontWeight:700,fontSize:12,color:C.text,lineHeight:1.3}}>{t.titulo}</p>
+                      <p style={{margin:0,color:C.textMuted,fontSize:11}}>{t.edificio} · {t.depto}</p>
                     </div>
-                    <button onClick={e=>{e.stopPropagation();onEdit(t);}} style={{background:"rgba(0,0,0,0.08)",border:"none",borderRadius:4,width:18,height:18,fontSize:9,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✏️</button>
+                    <button onClick={()=>setEditInline(t)} style={{background:"#F3F4F6",border:"none",borderRadius:5,width:20,height:20,fontSize:10,cursor:"pointer"}}>✏️</button>
                   </div>
                 </div>
               );
             })}
           </div>
-        </div>}
-        {sinDiaObra.length>0&&<div>
-          <p style={{margin:"0 0 0.5rem",fontSize:12,fontWeight:600,color:"#9B7DD4"}}>🏗️ Obra ({sinDiaObra.length})</p>
-          <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-            {sinDiaObra.map(t=>(
-              <div key={t.id} draggable onDragStart={e=>onDragStart(e,t)}
-                style={{background:"#2D1B69",border:"1px solid #7C5CBF",borderRadius:8,padding:"6px 10px",cursor:"grab",fontSize:12,maxWidth:200}}>
-                <p style={{margin:"0 0 2px",fontWeight:600,color:"#C9B8FF",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.titulo}</p>
-                <p style={{margin:0,color:"#A084E8",fontSize:11}}>{t.edificio} · {t.depto}</p>
-              </div>
-            ))}
-          </div>
-        </div>}
-        {sinDia.length===0&&<p style={{fontSize:13,color:"#aaa"}}>Todas las tareas tienen día asignado 👍</p>}
+        }
       </div>
     </div>
   );
 }
 
 // ── Preventivo ────────────────────────────────────────────────────────────────
-function Preventivo({edificios, prevData, savePrevData, showToast}){
-  const [verHist, setVerHist] = useState(false);
-  const [newTarea, setNewTarea] = useState("");
+function Preventivo({edificios, prevData, savePrevData, showToast, tareasCompletadas}){
+  const [verHist,setVerHist]=useState(false);
+  const [newTarea,setNewTarea]=useState("");
   const tareas   = prevData?.tareas   || [];
   const meses    = prevData?.meses    || {};
   const historial= prevData?.historial|| [];
   const celdas   = meses[CURRENT_MONTH] || {};
   const allDeptos = [];
-  Object.entries(edificios).forEach(([ed, ds]) => ds.forEach(dep => allDeptos.push({ed, dep})));
-  const celKey = (ed, dep, tarea) => `${ed}|${dep}|${tarea}`;
-  function ultimaVezRealizada(ed, dep, tarea) {
-    const mesesAnteriores = Object.entries(meses).filter(([m]) => m !== CURRENT_MONTH).sort(([a],[b]) => b.localeCompare(a));
-    const k = celKey(ed, dep, tarea);
-    for (const [, cels] of mesesAnteriores) { if (cels[k]?.done && cels[k]?.fecha) return cels[k].fecha; }
-    const hist = [...historial].sort((a,b) => b.mes.localeCompare(a.mes));
-    for (const h of hist) { if (h.celdas?.[k]?.done && h.celdas[k]?.fecha) return h.celdas[k].fecha; }
+  Object.entries(edificios).forEach(([ed,ds])=>ds.forEach(dep=>allDeptos.push({ed,dep})));
+  const celKey=(ed,dep,tarea)=>`${ed}|${dep}|${tarea}`;
+
+  // Auto-tildado: si hay una tarea completada de ese depto+tipo en el mes actual
+  useEffect(()=>{
+    if(!tareasCompletadas?.length||!tareas.length) return;
+    let changed=false;
+    const newCeldas={...celdas};
+    for(const {ed,dep} of allDeptos){
+      for(const tarea of tareas){
+        const k=celKey(ed,dep,tarea);
+        if(newCeldas[k]?.done) continue;
+        // Buscar tarea completada de ese edificio+depto en el mes actual
+        const match=tareasCompletadas.find(t=>
+          t.edificio===ed && t.depto===dep && t.estado==="Completada" &&
+          (t.fechaFin||t.fecha||"").startsWith(CURRENT_MONTH) &&
+          (t.tipo===tarea||t.titulo?.toLowerCase().includes(tarea.toLowerCase()))
+        );
+        if(match){ newCeldas[k]={done:true,fecha:match.fechaFin||match.fecha||TODAY,autoTildado:true}; changed=true; }
+      }
+    }
+    if(changed) savePrevData({...prevData,meses:{...meses,[CURRENT_MONTH]:newCeldas}});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[tareasCompletadas]);
+
+  function ultimaVez(ed,dep,tarea){
+    const todos=Object.entries(meses).filter(([m])=>m!==CURRENT_MONTH).sort(([a],[b])=>b.localeCompare(a));
+    const k=celKey(ed,dep,tarea);
+    for(const [,cels] of todos){ if(cels[k]?.done&&cels[k]?.fecha) return cels[k].fecha; }
     return null;
   }
-  async function toggleCelda(ed, dep, tarea) {
-    const k = celKey(ed, dep, tarea);
-    const prev = {...meses};
-    if (!prev[CURRENT_MONTH]) prev[CURRENT_MONTH] = {};
-    if (prev[CURRENT_MONTH][k]?.done) { delete prev[CURRENT_MONTH][k]; await savePrevData({...prevData, meses: prev}); return; }
-    const ultima = ultimaVezRealizada(ed, dep, tarea);
-    if (ultima) {
-      const diasDesde = Math.floor((new Date(TODAY) - new Date(ultima)) / 86400000);
-      if (diasDesde < 30) { const ok = window.confirm(`⚠️ Aviso: ya se realizó el ${FMT_DATE(ultima)} (hace ${diasDesde} días). ¿Marcar igual?`); if (!ok) return; }
+  async function toggleCelda(ed,dep,tarea){
+    const k=celKey(ed,dep,tarea);
+    const prev={...meses};
+    if(!prev[CURRENT_MONTH]) prev[CURRENT_MONTH]={};
+    if(prev[CURRENT_MONTH][k]?.done){delete prev[CURRENT_MONTH][k];await savePrevData({...prevData,meses:prev});return;}
+    const ultima=ultimaVez(ed,dep,tarea);
+    if(ultima){
+      const dias=Math.floor((new Date(TODAY)-new Date(ultima))/86400000);
+      if(dias<30){const ok=window.confirm(`⚠️ Ya se realizó el ${fmtDate(ultima)} (hace ${dias} días). ¿Marcar igual?`);if(!ok)return;}
     }
-    prev[CURRENT_MONTH][k] = {done: true, fecha: TODAY};
-    await savePrevData({...prevData, meses: prev});
+    prev[CURRENT_MONTH][k]={done:true,fecha:TODAY};
+    await savePrevData({...prevData,meses:prev});
   }
-  async function addTarea() {
-    const t = newTarea.trim();
-    if (!t || tareas.includes(t)) return;
-    await savePrevData({...prevData, tareas: [...tareas, t]});
-    setNewTarea("");
-  }
-  async function removeTarea(t) {
-    if (!window.confirm(`¿Eliminar la columna "${t}"?`)) return;
-    const newMeses = {};
-    Object.entries(meses).forEach(([m, cels]) => { newMeses[m] = {}; Object.entries(cels).forEach(([k, v]) => { if (!k.endsWith(`|${t}`)) newMeses[m][k] = v; }); });
-    await savePrevData({...prevData, tareas: tareas.filter(x => x !== t), meses: newMeses});
-  }
-  async function cerrarMes() {
-    const mesLabel = MONTHS[parseInt(CURRENT_MONTH.split("-")[1]) - 1] + " " + CURRENT_MONTH.split("-")[0];
-    if (!window.confirm(`¿Cerrar ${mesLabel}?`)) return;
-    const snapshot = { mes: CURRENT_MONTH, label: mesLabel, celdas: {...(meses[CURRENT_MONTH] || {})}, tareas: [...tareas], deptos: allDeptos.map(({ed, dep}) => ({ed, dep})) };
-    const newMeses = {...meses}; delete newMeses[CURRENT_MONTH];
-    await savePrevData({...prevData, historial: [...historial, snapshot], meses: newMeses});
+  async function addTarea(){const t=newTarea.trim();if(!t||tareas.includes(t))return;await savePrevData({...prevData,tareas:[...tareas,t]});setNewTarea("");}
+  async function cerrarMes(){
+    const mesLabel=MONTHS[parseInt(CURRENT_MONTH.split("-")[1])-1]+" "+CURRENT_MONTH.split("-")[0];
+    if(!window.confirm(`¿Cerrar ${mesLabel}?`))return;
+    const snap={mes:CURRENT_MONTH,label:mesLabel,celdas:{...(meses[CURRENT_MONTH]||{})},tareas:[...tareas],deptos:allDeptos.map(({ed,dep})=>({ed,dep}))};
+    const nm={...meses};delete nm[CURRENT_MONTH];
+    await savePrevData({...prevData,historial:[...historial,snap],meses:nm});
     showToast("📋 Mes cerrado y archivado");
   }
-  const total = allDeptos.length * tareas.length;
-  const done  = Object.values(celdas).filter(v => v?.done).length;
-  const pct   = total > 0 ? Math.round(done / total * 100) : 0;
-  const mesLabel = MONTHS[parseInt(CURRENT_MONTH.split("-")[1]) - 1] + " " + CURRENT_MONTH.split("-")[0];
+  const total=allDeptos.length*tareas.length;
+  const done=Object.values(celdas).filter(v=>v?.done).length;
+  const pct=total>0?Math.round(done/total*100):0;
+  const mesLabel=MONTHS[parseInt(CURRENT_MONTH.split("-")[1])-1]+" "+CURRENT_MONTH.split("-")[0];
 
-  if (verHist) return (
+  if(verHist) return(
     <div>
       <div style={{display:"flex",gap:"0.75rem",alignItems:"center",marginBottom:"1.25rem"}}>
-        <button onClick={()=>setVerHist(false)} style={S.btn()}>← Volver</button>
-        <p style={{margin:0,fontWeight:600,fontSize:16}}>📋 Historial preventivo</p>
+        <button onClick={()=>setVerHist(false)} style={btn()}>← Volver</button>
+        <p style={{margin:0,fontWeight:700,fontSize:16}}>📋 Historial preventivo</p>
       </div>
-      {historial.length === 0 && <p style={{color:"#888",fontSize:14}}>Sin meses archivados aún.</p>}
-      {[...historial].reverse().map((h, i) => {
-        const tot = (h.deptos||[]).length * (h.tareas||[]).length;
-        const dn  = Object.values(h.celdas||{}).filter(v=>v?.done).length;
-        const p   = tot > 0 ? Math.round(dn/tot*100) : 0;
-        return (
-          <div key={i} style={{...S.card, marginBottom:"0.75rem"}}>
+      {historial.length===0&&<p style={{color:C.textMuted,fontSize:14}}>Sin meses archivados aún.</p>}
+      {[...historial].reverse().map((h,i)=>{
+        const tot=(h.deptos||[]).length*(h.tareas||[]).length;
+        const dn=Object.values(h.celdas||{}).filter(v=>v?.done).length;
+        const p=tot>0?Math.round(dn/tot*100):0;
+        return(
+          <div key={i} style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:14,padding:"1rem 1.25rem",marginBottom:"0.75rem",boxShadow:C.shadow}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"0.75rem"}}>
-              <p style={{margin:0,fontWeight:600,fontSize:15}}>{h.label}</p>
-              <span style={S.tag(p===100?"#EAF3DE":"#E6F1FB",p===100?"#3B6D11":"#185FA5",p===100?"#97C459":"#85B7EB")}>{p}% · {dn}/{tot}</span>
+              <p style={{margin:0,fontWeight:700,fontSize:15}}>{h.label}</p>
+              <Badge label={`${p}% · ${dn}/${tot}`} bg={p===100?C.successLight:C.blueLight} text={p===100?C.success:C.blue} border={p===100?"#6EE7B7":"#93C5FD"}/>
             </div>
             <div style={{overflowX:"auto"}}>
               <table style={{borderCollapse:"collapse",fontSize:11,minWidth:400}}>
                 <thead><tr>
-                  <th style={{padding:"5px 10px",background:"#f7f6f2",border:"1px solid #e2e0d8",textAlign:"left",fontWeight:600,color:"#555",minWidth:110,position:"sticky",left:0,zIndex:1}}>Departamento</th>
-                  {(h.tareas||[]).map(t=>(<th key={t} style={{padding:"5px 10px",background:"#f7f6f2",border:"1px solid #e2e0d8",fontWeight:600,color:"#555",textAlign:"center",minWidth:90}}>{t}</th>))}
+                  <th style={{padding:"5px 10px",background:"#F3F4F6",border:`1px solid ${C.border}`,textAlign:"left",fontWeight:700,color:C.textMuted,minWidth:120,position:"sticky",left:0}}>Depto</th>
+                  {(h.tareas||[]).map(t=><th key={t} style={{padding:"5px 10px",background:"#F3F4F6",border:`1px solid ${C.border}`,fontWeight:700,color:C.textMuted,textAlign:"center",minWidth:90}}>{t}</th>)}
                 </tr></thead>
                 <tbody>
                   {(h.deptos||[]).map(({ed,dep},ri)=>(
-                    <tr key={ri} style={{background:ri%2===0?"#fff":"#fafaf8"}}>
-                      <td style={{padding:"5px 10px",border:"1px solid #e2e0d8",fontWeight:500,color:"#444",position:"sticky",left:0,background:ri%2===0?"#fff":"#fafaf8",zIndex:1}}>{ed} · {dep}</td>
-                      {(h.tareas||[]).map(t=>{ const v = h.celdas?.[`${ed}|${dep}|${t}`]; return (<td key={t} style={{padding:"5px 10px",border:"1px solid #e2e0d8",textAlign:"center",background:v?.done?"#EAF3DE":"#fff"}}>{v?.done?<span style={{color:"#3B6D11",fontSize:11}}>✓ {FMT_DATE(v.fecha)}</span>:<span style={{color:"#ddd",fontSize:14}}>—</span>}</td>); })}
+                    <tr key={ri} style={{background:ri%2===0?"#fff":"#FAFAFA"}}>
+                      <td style={{padding:"5px 10px",border:`1px solid ${C.border}`,fontWeight:600,color:C.text,position:"sticky",left:0,background:ri%2===0?"#fff":"#FAFAFA"}}>{ed}·{dep}</td>
+                      {(h.tareas||[]).map(t=>{const v=h.celdas?.[`${ed}|${dep}|${t}`];return(<td key={t} style={{padding:"5px 8px",border:`1px solid ${C.border}`,textAlign:"center",background:v?.done?C.successLight:"#fff"}}>{v?.done?<span style={{color:C.success,fontSize:11}}>✓ {fmtDate(v.fecha)}</span>:<span style={{color:C.textLight}}>—</span>}</td>);})}
                     </tr>
                   ))}
                 </tbody>
@@ -620,70 +673,185 @@ function Preventivo({edificios, prevData, savePrevData, showToast}){
     </div>
   );
 
-  return (
+  return(
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:"0.75rem",marginBottom:"1.25rem"}}>
         <div>
           <p style={{margin:0,fontWeight:700,fontSize:18}}>🔧 Preventivo — {mesLabel}</p>
-          <p style={{margin:"2px 0 0",fontSize:13,color:"#888"}}>{done} de {total} tareas completadas este mes</p>
+          <p style={{margin:"2px 0 0",fontSize:13,color:C.textMuted}}>{done} de {total} items completados · {pct}%</p>
         </div>
         <div style={{display:"flex",gap:"0.5rem",flexWrap:"wrap"}}>
-          <button onClick={()=>setVerHist(true)} style={S.btn()}>📋 Historial ({historial.length})</button>
-          <button onClick={cerrarMes} style={{...S.btn("#854F0B","#fff")}}>📦 Cerrar mes</button>
+          <button onClick={()=>setVerHist(true)} style={btn()}>📋 Historial ({historial.length})</button>
+          <button onClick={cerrarMes} style={btn(C.warnLight,C.warn,"#FCD34D")}>📦 Cerrar mes</button>
         </div>
       </div>
-      <div style={{marginBottom:"1.25rem"}}>
-        <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-          <span style={{fontSize:13,color:"#555",fontWeight:500}}>Progreso del mes</span>
-          <span style={{fontSize:13,fontWeight:700,color:pct===100?"#3B6D11":"#185FA5"}}>{pct}%</span>
+      {/* Barra de progreso */}
+      <div style={{marginBottom:"1.25rem",background:"#fff",border:`1px solid ${C.border}`,borderRadius:12,padding:"1rem",boxShadow:C.shadow}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+          <span style={{fontSize:13,fontWeight:600,color:C.text}}>Progreso del mes</span>
+          <span style={{fontSize:14,fontWeight:700,color:pct===100?C.success:C.blue}}>{pct}%</span>
         </div>
-        <div style={{background:"#e2e0d8",borderRadius:99,height:10,overflow:"hidden"}}>
-          <div style={{width:`${pct}%`,height:"100%",background:pct===100?"#3B6D11":"#185FA5",borderRadius:99,transition:"width 0.4s"}}/>
+        <div style={{background:"#E5E7EB",borderRadius:99,height:12,overflow:"hidden"}}>
+          <div style={{width:`${pct}%`,height:"100%",background:pct===100?C.success:C.blue,borderRadius:99,transition:"width 0.5s"}}/>
         </div>
       </div>
-      <div style={{...S.section,padding:"1rem 1.25rem",marginBottom:"1.25rem"}}>
-        <p style={{margin:"0 0 0.75rem",fontWeight:500,fontSize:14}}>➕ Agregar tarea al preventivo</p>
+      {/* Agregar tarea preventiva */}
+      <div style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:12,padding:"1rem",marginBottom:"1.25rem",boxShadow:C.shadow}}>
+        <p style={{margin:"0 0 0.75rem",fontWeight:600,fontSize:14}}>➕ Agregar tipo de tarea preventiva</p>
         <div style={{display:"flex",gap:"0.5rem"}}>
-          <input style={{...S.input,flex:1}} placeholder="Ej: Revisión matafuegos..." value={newTarea} onChange={e=>setNewTarea(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addTarea();}}/>
-          <button onClick={addTarea} style={{...S.btn("#185FA5","#fff"),whiteSpace:"nowrap"}}>+ Agregar</button>
+          <input style={{...inp,flex:1}} placeholder="Ej: Revisión matafuegos, Limpieza tanque..." value={newTarea} onChange={e=>setNewTarea(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addTarea();}}/>
+          <button onClick={addTarea} style={btn(C.blue,"#fff",C.blue)}>+ Agregar</button>
         </div>
-        {tareas.length > 0 && (
+        {tareas.length>0&&(
           <div style={{marginTop:"0.75rem",display:"flex",flexWrap:"wrap",gap:6}}>
-            {tareas.map(t=>(<span key={t} style={{...S.tag("#E6F1FB","#185FA5","#85B7EB"),display:"flex",alignItems:"center",gap:4}}>{t}<button onClick={()=>removeTarea(t)} style={{background:"none",border:"none",cursor:"pointer",color:"#A32D2D",fontSize:13,padding:0,lineHeight:1}}>✕</button></span>))}
+            {tareas.map(t=>(
+              <span key={t} style={{...pill(C.blueLight,C.blue,"#93C5FD"),display:"flex",alignItems:"center",gap:4}}>
+                {t}<button onClick={async()=>{if(!window.confirm(`¿Eliminar "${t}"?`))return;const nm={};Object.entries(meses).forEach(([m,cels])=>{nm[m]={};Object.entries(cels).forEach(([k,v])=>{if(!k.endsWith(`|${t}`))nm[m][k]=v;});});await savePrevData({...prevData,tareas:tareas.filter(x=>x!==t),meses:nm});}} style={{background:"none",border:"none",cursor:"pointer",color:C.danger,fontSize:13,padding:0,lineHeight:1}}>✕</button>
+              </span>
+            ))}
           </div>
         )}
       </div>
-      {tareas.length === 0 && (<div style={{textAlign:"center",padding:"3rem 0",color:"#aaa"}}><p style={{fontSize:32,marginBottom:8}}>📋</p><p style={{fontSize:15}}>Agregá tareas arriba para armar la tabla preventiva.</p></div>)}
-      {tareas.length > 0 && (
-        <div style={{overflowX:"auto"}}>
-          <table style={{borderCollapse:"collapse",fontSize:13,width:"100%",minWidth:400+tareas.length*110}}>
-            <thead><tr>
-              <th style={{padding:"8px 12px",background:"#1C2B45",border:"1px solid #2E4A6E",textAlign:"left",fontWeight:600,color:"#8BAFD4",minWidth:130,position:"sticky",left:0,zIndex:2}}>Departamento</th>
-              {tareas.map(t=>(<th key={t} style={{padding:"8px 12px",background:"#1C2B45",border:"1px solid #2E4A6E",fontWeight:600,color:"#fff",textAlign:"center",minWidth:110}}>{t}</th>))}
-            </tr></thead>
-            <tbody>
-              {allDeptos.map(({ed, dep}, ri) => (
-                <tr key={`${ed}-${dep}`} style={{background:ri%2===0?"#fff":"#fafaf8"}}>
-                  <td style={{padding:"7px 12px",border:"1px solid #e2e0d8",fontWeight:600,color:"#333",fontSize:13,position:"sticky",left:0,zIndex:1,background:ri%2===0?"#fff":"#fafaf8"}}>
-                    <span style={{fontSize:11,color:"#aaa",fontWeight:400}}>{ed} · </span>{dep}
-                  </td>
-                  {tareas.map(tarea => {
-                    const k = celKey(ed, dep, tarea);
-                    const val = celdas[k];
-                    const isDone = val?.done;
-                    return (
-                      <td key={tarea} style={{padding:"6px 8px",border:"1px solid #e2e0d8",textAlign:"center",background:isDone?"#EAF3DE":"#fff",cursor:"pointer",transition:"background 0.15s"}}
-                        onClick={()=>toggleCelda(ed, dep, tarea)} title={isDone?`Realizado el ${FMT_DATE(val.fecha)}`:"Clic para marcar"}>
-                        {isDone?(<div><div style={{color:"#3B6D11",fontWeight:700,fontSize:15}}>✓</div><div style={{fontSize:10,color:"#5a9a3a"}}>{FMT_DATE(val.fecha)}</div></div>):(<div style={{width:20,height:20,border:"2px solid #dddbd3",borderRadius:4,margin:"0 auto",background:"#f7f6f2"}}/>)}
-                      </td>
-                    );
-                  })}
+      {tareas.length===0&&<div style={{textAlign:"center",padding:"3rem 0",color:C.textMuted}}><p style={{fontSize:40}}>📋</p><p>Agregá tipos de tarea arriba para armar la tabla mensual.</p></div>}
+      {tareas.length>0&&(
+        <div style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:14,overflow:"hidden",boxShadow:C.shadow}}>
+          <div style={{overflowX:"auto"}}>
+            <table style={{borderCollapse:"collapse",fontSize:12,width:"100%"}}>
+              <thead>
+                <tr>
+                  <th style={{padding:"10px 14px",background:"#1E293B",border:`1px solid #334155`,textAlign:"left",fontWeight:700,color:"#94A3B8",minWidth:140,position:"sticky",left:0,zIndex:2}}>Depto</th>
+                  {tareas.map(t=><th key={t} style={{padding:"10px 12px",background:"#1E293B",border:"1px solid #334155",fontWeight:700,color:"#fff",textAlign:"center",minWidth:100,fontSize:11}}>{t}</th>)}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {allDeptos.map(({ed,dep},ri)=>(
+                  <tr key={`${ed}-${dep}`} style={{background:ri%2===0?"#fff":"#F9FAFB"}}>
+                    <td style={{padding:"8px 14px",border:`1px solid ${C.border}`,fontWeight:600,color:C.text,position:"sticky",left:0,zIndex:1,background:ri%2===0?"#fff":"#F9FAFB"}}>
+                      <span style={{fontSize:10,color:C.textLight,fontWeight:400}}>{ed} · </span>{dep}
+                    </td>
+                    {tareas.map(tarea=>{
+                      const k=celKey(ed,dep,tarea);
+                      const val=celdas[k];
+                      const isDone=val?.done;
+                      return(
+                        <td key={tarea} style={{padding:"6px 8px",border:`1px solid ${C.border}`,textAlign:"center",background:isDone?C.successLight:"#fff",cursor:"pointer",transition:"background 0.15s"}}
+                          onClick={()=>toggleCelda(ed,dep,tarea)} title={isDone?`Realizado el ${fmtDate(val.fecha)}${val.autoTildado?" (auto)":""}`:""}>
+                          {isDone
+                            ?<div><div style={{color:C.success,fontWeight:800,fontSize:16}}>✓</div><div style={{fontSize:10,color:C.success}}>{fmtDate(val.fecha)}{val.autoTildado?" 🤖":""}</div></div>
+                            :<div style={{width:22,height:22,border:`2px solid ${C.border}`,borderRadius:5,margin:"0 auto",background:"#F9FAFB"}}/>}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Historial ─────────────────────────────────────────────────────────────────
+function Historial({tareas, edificios, onEdit, onEstado, onDelete, onComentario, onIniciar}){
+  const [filtro, setFiltro] = useState({edificio:"",depto:"",tipo:"",mes:""});
+  const [expanded, setExpanded] = useState({});
+
+  const completadas = tareas.filter(t=>t.estado==="Completada");
+
+  // Filtrar
+  const filtradas = completadas.filter(t=>{
+    if(filtro.edificio && t.edificio!==filtro.edificio) return false;
+    if(filtro.depto && t.depto!==filtro.depto) return false;
+    if(filtro.tipo && t.tipo!==filtro.tipo) return false;
+    if(filtro.mes && !(t.fechaFin||t.fecha||"").startsWith(filtro.mes)) return false;
+    return true;
+  });
+
+  // Agrupar por mes
+  const porMes = {};
+  filtradas.forEach(t=>{
+    const d = t.fechaFin||t.fechaCarga||t.fecha||TODAY;
+    const mes = d.slice(0,7);
+    if(!porMes[mes]) porMes[mes]=[];
+    porMes[mes].push(t);
+  });
+  const mesesOrdenados = Object.keys(porMes).sort((a,b)=>b.localeCompare(a));
+
+  const deptosParaFiltro = filtro.edificio ? (edificios[filtro.edificio]||[]) : [];
+
+  // Meses únicos presentes
+  const mesesDisponibles = [...new Set(completadas.map(t=>(t.fechaFin||t.fechaCarga||t.fecha||"").slice(0,7)).filter(Boolean))].sort((a,b)=>b.localeCompare(a));
+  const tiposDisponibles = [...new Set(completadas.map(t=>t.tipo).filter(Boolean))];
+
+  const mesLabel = m => {
+    const [y,mo] = m.split("-");
+    return `${MONTHS[parseInt(mo)-1]} ${y}`;
+  };
+
+  return(
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem",flexWrap:"wrap",gap:"0.5rem"}}>
+        <p style={{margin:0,fontWeight:700,fontSize:16}}>📋 Historial — {completadas.length} tareas completadas</p>
+      </div>
+
+      {/* Filtros */}
+      <div style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:12,padding:"1rem",marginBottom:"1rem",boxShadow:C.shadow}}>
+        <p style={{margin:"0 0 0.6rem",fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em"}}>Filtrar historial</p>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"0.75rem"}}>
+          <select style={{...inp,fontSize:13}} value={filtro.edificio} onChange={e=>setFiltro(p=>({...p,edificio:e.target.value,depto:""}))}>
+            <option value="">Edificio (todos)</option>
+            {Object.keys(edificios).map(o=><option key={o}>{o}</option>)}
+          </select>
+          <select style={{...inp,fontSize:13}} value={filtro.depto} onChange={e=>setFiltro(p=>({...p,depto:e.target.value}))} disabled={!filtro.edificio}>
+            <option value="">Depto (todos)</option>
+            {deptosParaFiltro.map(o=><option key={o}>{o}</option>)}
+          </select>
+          <select style={{...inp,fontSize:13}} value={filtro.mes} onChange={e=>setFiltro(p=>({...p,mes:e.target.value}))}>
+            <option value="">Mes (todos)</option>
+            {mesesDisponibles.map(m=><option key={m} value={m}>{mesLabel(m)}</option>)}
+          </select>
+          <select style={{...inp,fontSize:13}} value={filtro.tipo} onChange={e=>setFiltro(p=>({...p,tipo:e.target.value}))}>
+            <option value="">Tipo (todos)</option>
+            {tiposDisponibles.map(o=><option key={o}>{o}</option>)}
+          </select>
+        </div>
+        {(filtro.edificio||filtro.depto||filtro.mes||filtro.tipo)&&(
+          <button onClick={()=>setFiltro({edificio:"",depto:"",tipo:"",mes:""})} style={{...btn(),marginTop:"0.5rem",fontSize:12,padding:"5px 12px",color:C.danger,borderColor:"#FCA5A5"}}>✕ Limpiar filtros</button>
+        )}
+      </div>
+
+      {filtradas.length===0
+        ? <div style={{textAlign:"center",padding:"3rem",color:C.textMuted}}><p style={{fontSize:40}}>📭</p><p>No hay tareas completadas con esos filtros.</p></div>
+        : mesesOrdenados.map(mes=>{
+          const ts=porMes[mes];
+          const isOpen=expanded[mes]!==false; // default abierto
+          return(
+            <div key={mes} style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:14,marginBottom:"0.75rem",overflow:"hidden",boxShadow:C.shadow}}>
+              <div onClick={()=>setExpanded(p=>({...p,[mes]:!isOpen}))}
+                style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",background:isOpen?"#F0FDF4":"#fff",borderBottom:isOpen?`1px solid ${C.border}`:"none"}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{fontSize:18}}>📅</span>
+                  <div>
+                    <p style={{margin:0,fontWeight:700,fontSize:15,color:C.text}}>{mesLabel(mes)}</p>
+                    <p style={{margin:0,fontSize:12,color:C.textMuted}}>{ts.length} tarea{ts.length!==1?"s":""} completada{ts.length!==1?"s":""}</p>
+                  </div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <Badge label={`${ts.length} completadas`} bg={C.successLight} text={C.success} border="#6EE7B7"/>
+                  <span style={{color:C.textMuted,fontSize:14}}>{isOpen?"▲":"▼"}</span>
+                </div>
+              </div>
+              {isOpen&&(
+                <div style={{padding:"0.75rem"}}>
+                  {ts.map(t=><TareaCard key={t.id} t={t} onEdit={onEdit} onEstado={onEstado} onDelete={onDelete} onComentario={onComentario} onIniciar={onIniciar}/>)}
+                </div>
+              )}
+            </div>
+          );
+        })
+      }
     </div>
   );
 }
@@ -699,7 +867,6 @@ export default function App(){
   const [showForm,setShowForm]=useState(false);
   const [editando,setEditando]=useState(null);
   const [filtro,setFiltro]=useState({edificio:"",depto:"",urgencia:"",estado:"",tipo:"",asignado:""});
-  const [filtroHist,setFiltroHist]=useState({edificio:"",depto:""});
   const [newEdificio,setNewEdificio]=useState("");
   const [newDepto,setNewDepto]=useState({ed:"QDB",nombre:""});
   const [newTipo,setNewTipo]=useState("");
@@ -708,7 +875,7 @@ export default function App(){
   const [toast,setToast]=useState(null);
   const [procesadosIds,setProcesadosIds]=useState(new Set());
   const [deptoModal,setDeptoModal]=useState(null);
-  const [iniciarModal,setIniciarModal]=useState(null); // tarea a iniciar
+  const [iniciarModal,setIniciarModal]=useState(null);
 
   const nextId=useRef(Date.now());
   const unsubs=useRef([]);
@@ -717,9 +884,9 @@ export default function App(){
   const showToast=(msg,tipo="ok")=>{setToast({msg,tipo});setTimeout(()=>setToast(null),4000);};
 
   const saveTareas=useCallback(async v=>{
-    const dedup=deduplicar(v);
-    setTareasState(dedup);
-    try{await aSet("alma_tasks",dedup);}catch(e){console.error(e);}
+    const d=dedup(v);
+    setTareasState(d);
+    try{await aSet("alma_tasks",d);}catch(e){console.error(e);}
   },[]);
   const saveEdificios=useCallback(async v=>{setEdificiosState(v);try{await aSet("alma_edificios",v);}catch(e){console.error(e);};},[]);
   const saveTipos=useCallback(async v=>{setTiposState(v);try{await aSet("alma_tipos",v);}catch(e){console.error(e);};},[]);
@@ -735,31 +902,15 @@ export default function App(){
           aGet("alma_tasks"),aGet("alma_edificios"),aGet("alma_tipos"),
           aGet("alma_preventivo"),aGet("alma_procesados"),aGet("alma_personal"),
         ]);
-        if(!mounted) return;
-        if(t) setTareasState(deduplicar(t));
-        if(e) setEdificiosState(e);
-        if(ti) setTiposState(ti);
-        if(pv) setPrevDataState(pv);
+        if(!mounted)return;
+        if(t)setTareasState(dedup(t));
+        if(e)setEdificiosState(e);
+        if(ti)setTiposState(ti);
+        if(pv)setPrevDataState(pv);
         if(proc){procesadosRef.current=new Set(proc);setProcesadosIds(new Set(proc));}
-        if(pers) setPersonalState(pers);
+        if(pers)setPersonalState(pers);
 
-        // Retroactivo: asegurar que todas las tareas migradas de reportes tengan origen="reporte"
-        if(t) {
-          const repsData = await lGet("lim_reports").catch(()=>null);
-          const repIds = new Set((repsData||[]).map(r=>String(r.id)));
-          let changed = false;
-          const tFixed = deduplicar(t).map(task => {
-            if(task.reporteId && task.origen !== "reporte") { changed=true; return {...task, origen:"reporte"}; }
-            // Si tiene historial con "Migrada automáticamente" y no tiene origen
-            if(!task.origen && task.historial?.some(h=>h.includes("Migrada automáticamente"))) {
-              changed=true; return {...task, origen:"reporte"};
-            }
-            return task;
-          });
-          if(changed) { await aSet("alma_tasks", tFixed); setTareasState(tFixed); }
-        }
-
-        const u1=aListen("alma_tasks",d=>{if(mounted&&d)setTareasState(deduplicar(d));});
+        const u1=aListen("alma_tasks",d=>{if(mounted&&d)setTareasState(dedup(d));});
         const u2=aListen("alma_preventivo",d=>{if(mounted&&d)setPrevDataState(d);});
         unsubs.current.push(u1,u2);
         setLoading(false);
@@ -775,26 +926,26 @@ export default function App(){
   const checkReportes=useCallback(async()=>{
     try{
       const reps=await lGet("lim_reports");
-      if(!reps||!Array.isArray(reps)) return;
+      if(!reps||!Array.isArray(reps))return;
       const nuevos=reps.filter(r=>r.comentario?.trim()&&!procesadosRef.current.has(String(r.id)));
-      if(!nuevos.length) return;
+      if(!nuevos.length)return;
       let tareasAct=await aGet("alma_tasks")||[];
-      tareasAct=deduplicar(tareasAct);
+      tareasAct=dedup(tareasAct);
       for(const rep of nuevos){
-        if(procesadosRef.current.has(String(rep.id))) continue;
+        if(procesadosRef.current.has(String(rep.id)))continue;
         procesadosRef.current.add(String(rep.id));
         await aSet("alma_procesados",Array.from(procesadosRef.current));
         setProcesadosIds(new Set(procesadosRef.current));
         const res=clasificarReporte(rep.comentario);
-        if(!res.esMantenimiento) continue;
-        // Evitar duplicados: mismo reporteId O mismo título+edificio+depto
-        if(tareasAct.some(t=>t.reporteId===rep.id)) continue;
+        if(!res.esMantenimiento)continue;
+        // Anti-duplicado: mismo reporteId
+        if(tareasAct.some(t=>String(t.reporteId)===String(rep.id)))continue;
         let ed="",dep="";
         const m=(rep.depto||"").trim().match(/^(QDB|H475|qdb|h475)\s*(.+)$/i);
         if(m){ed=m[1].toUpperCase();dep=m[2].trim();}else{ed="H475";dep=(rep.depto||"").trim();}
         const titulo=capitalizar(rep.comentario.slice(0,60));
-        // Verificar duplicado por título+edificio+depto
-        if(tareasAct.some(t=>t.titulo===titulo&&t.edificio===ed&&t.depto===dep)) continue;
+        // Anti-duplicado: mismo título+edificio+depto activo
+        if(tareasAct.some(t=>t.titulo===titulo&&t.edificio===ed&&t.depto===dep&&t.estado!=="Completada"))continue;
         const nt={
           id:Date.now()+Math.random(),
           titulo,edificio:ed,depto:dep,tipo:res.tipo||"General",
@@ -809,7 +960,7 @@ export default function App(){
         tareasAct=[...tareasAct,nt];
         showToast(`🔗 Nueva tarea: ${nt.titulo}`);
       }
-      const final=deduplicar(tareasAct);
+      const final=dedup(tareasAct);
       await aSet("alma_tasks",final);
       setTareasState(final);
     }catch(e){console.error(e);}
@@ -817,10 +968,10 @@ export default function App(){
   },[]);
 
   const enviarLimpieza=useCallback(async tarea=>{
-    if(!tarea.limpieza||!tarea.fechaFin) return;
+    if(!tarea.limpieza||!tarea.fechaFin)return;
     try{
       const lt=await lGet("lim_tasks")||[];
-      if(lt.some(t=>t._almaId===tarea.id)) return;
+      if(lt.some(t=>t._almaId===tarea.id))return;
       const n={id:Date.now(),_almaId:tarea.id,depto:`${tarea.edificio} ${tarea.depto}`,fecha:tarea.fechaFin,tipo:"Otro",descripcion:`🔧 Post-mantenimiento: ${tarea.titulo}`,comentario:"Limpieza tras mantenimiento",asignado:"",completado:false,ingresos:[],minutosOtro:null,libre:false};
       const {doc,setDoc}=window._fb;
       await setDoc(doc(dbLimp,"limpiezas","lim_tasks"),{value:JSON.stringify([...lt,n])});
@@ -834,14 +985,13 @@ export default function App(){
     let lista;
     if(editando){
       lista=tareas.map(t=>{
-        if(t.id!==editando.id) return t;
-        const h=[...(t.historial||[]),`Editada el ${hoy}`];
-        return {...f,id:t.id,origen:t.origen,fotoReporte:t.fotoReporte,reporteId:t.reporteId,fechaCarga:t.fechaCarga||TODAY,historial:h};
+        if(t.id!==editando.id)return t;
+        return {...f,id:t.id,origen:t.origen,fotoReporte:t.fotoReporte,reporteId:t.reporteId,fechaCarga:t.fechaCarga||TODAY,historial:[...(t.historial||[]),`Editada el ${hoy}`]};
       });
     }else{
-      // Verificar duplicado por título+edificio+depto antes de agregar
+      // Anti-duplicado manual
       const isDup=tareas.some(t=>t.titulo.trim()===f.titulo.trim()&&t.edificio===f.edificio&&t.depto===f.depto&&t.estado!=="Completada");
-      if(isDup){showToast("⚠️ Ya existe una tarea igual (mismo título, edificio y dpto)","err");return;}
+      if(isDup){showToast("⚠️ Ya existe una tarea igual para ese depto","err");return;}
       const nt={...f,id:nextId.current++,fechaCarga:TODAY,historial:[`Creada el ${hoy}`]};
       lista=[...tareas,nt];
     }
@@ -850,26 +1000,27 @@ export default function App(){
 
   const cambiarEstado=useCallback(async(id,nuevoEstado,fechaInicio)=>{
     const lista=tareas.map(t=>{
-      if(t.id!==id) return t;
-      const h=[...(t.historial||[]),`${new Date().toLocaleDateString("es-AR")} — Estado: ${nuevoEstado}`];
+      if(t.id!==id)return t;
+      const h=[...(t.historial||[]),`${new Date().toLocaleDateString("es-AR")} → ${nuevoEstado}`];
       const upd={...t,estado:nuevoEstado,historial:h};
-      if(fechaInicio) upd.fecha=fechaInicio;
-      if(nuevoEstado==="Completada"&&t.limpieza) enviarLimpieza(upd);
+      if(fechaInicio)upd.fecha=fechaInicio;
+      if(nuevoEstado==="Completada"){
+        upd.fechaFin=upd.fechaFin||TODAY;
+        if(t.limpieza)enviarLimpieza(upd);
+      }
       return upd;
     });
     await saveTareas(lista);
   },[tareas,saveTareas,enviarLimpieza]);
 
-  // Iniciar tarea: abre modal para elegir fecha
-  const handleIniciar=useCallback((tarea)=>{
-    setIniciarModal(tarea);
-  },[]);
-
   const confirmarIniciar=useCallback(async(tarea,fechaInicio)=>{
     await cambiarEstado(tarea.id,"En curso",fechaInicio);
   },[cambiarEstado]);
 
-  const eliminarTarea=useCallback(async id=>await saveTareas(tareas.filter(t=>t.id!==id)),[tareas,saveTareas]);
+  const eliminarTarea=useCallback(async id=>{
+    if(!window.confirm("¿Eliminar esta tarea?"))return;
+    await saveTareas(tareas.filter(t=>t.id!==id));
+  },[tareas,saveTareas]);
 
   const guardarComentario=useCallback(async(id,comentario)=>{
     await saveTareas(tareas.map(t=>t.id===id?{...t,comentario}:t));
@@ -878,62 +1029,56 @@ export default function App(){
   },[tareas,saveTareas]);
 
   const moverTarea=useCallback(async(id,fechaTrabajo)=>{
-    // Al asignar un día, cambiar estado a "Asignada" si estaba Pendiente
     const lista=tareas.map(t=>{
-      if(t.id!==id) return t;
+      if(t.id!==id)return t;
       const nuevoEstado=t.estado==="Pendiente"?"Asignada":t.estado;
-      const h=[...(t.historial||[]),`Asignada al ${FMT_DATE(fechaTrabajo)}`];
-      return {...t,fechaTrabajo,estado:nuevoEstado,historial:h};
+      return {...t,fechaTrabajo,estado:nuevoEstado,historial:[...(t.historial||[]),`Asignada al ${fmtDate(fechaTrabajo)}`]};
     });
     await saveTareas(lista);
   },[tareas,saveTareas]);
 
-  const quitarDiaTarea=useCallback(async id=>{
+  const quitarDia=useCallback(async id=>{
     const lista=tareas.map(t=>{
-      if(t.id!==id) return t;
+      if(t.id!==id)return t;
       const {fechaTrabajo:_,...rest}=t;
-      // Si estaba Asignada, volver a Pendiente
-      const nuevoEstado=t.estado==="Asignada"?"Pendiente":t.estado;
-      return {...rest,estado:nuevoEstado};
+      return {...rest,estado:t.estado==="Asignada"?"Pendiente":t.estado};
     });
     await saveTareas(lista);
   },[tareas,saveTareas]);
 
-  const tareasActivas=sortDesc(deduplicar(tareas.filter(t=>t.estado!=="Completada")));
-  const tareasComp   =sortDesc(deduplicar(tareas.filter(t=>t.estado==="Completada")));
-  const urgentes     =sortDesc(tareasActivas.filter(t=>t.urgencia==="Urgente"));
-  const enCurso      =sortDesc(tareas.filter(t=>t.estado==="En curso"));
-  const huesped      =sortDesc(tareas.filter(t=>t.huespedAlerta&&t.estado!=="Completada"));
+  // Derived
+  const activas = sortDesc(dedup(tareas.filter(t=>t.estado!=="Completada")));
+  const completadas = sortDesc(dedup(tareas.filter(t=>t.estado==="Completada")));
+  const urgentes = activas.filter(t=>t.urgencia==="Urgente");
+  const enCurso  = activas.filter(t=>t.estado==="En curso");
+  const huesped  = activas.filter(t=>t.huespedAlerta);
 
-  // Filtro tareas activas
-  const tareasF=sortDesc(deduplicar(tareas.filter(t=>{
-    if(t.estado==="Completada") return false;
-    if(filtro.edificio&&t.edificio!==filtro.edificio) return false;
-    if(filtro.depto&&t.depto!==filtro.depto) return false;
-    if(filtro.urgencia&&t.urgencia!==filtro.urgencia) return false;
-    if(filtro.tipo&&t.tipo!==filtro.tipo) return false;
-    if(filtro.asignado&&t.asignado!==filtro.asignado) return false;
+  // Filtro tareas
+  const tareasF=sortDesc(dedup(tareas.filter(t=>{
+    if(t.estado==="Completada")return false;
+    if(filtro.edificio&&t.edificio!==filtro.edificio)return false;
+    if(filtro.depto&&t.depto!==filtro.depto)return false;
+    if(filtro.urgencia&&t.urgencia!==filtro.urgencia)return false;
+    if(filtro.tipo&&t.tipo!==filtro.tipo)return false;
+    if(filtro.asignado&&t.asignado!==filtro.asignado)return false;
     if(filtro.estado){
-      if(filtro.estado==="Pendiente") return t.estado==="Pendiente"||(!t.estado);
+      if(filtro.estado==="Pendiente")return t.estado==="Pendiente"||!t.estado;
       return t.estado===filtro.estado;
     }
     return true;
   })));
 
-  // Deptos del edificio filtrado (para filtro de tareas y historial)
-  const deptosParaFiltro = filtro.edificio ? (edificios[filtro.edificio]||[]) : [];
-  const deptosParaHistFiltro = filtroHist.edificio ? (edificios[filtroHist.edificio]||[]) : [];
+  const deptosParaFiltro=filtro.edificio?(edificios[filtro.edificio]||[]):[];
 
-  // Filtro historial
-  const tareasHistF=sortDesc(deduplicar(tareas.filter(t=>{
-    if(t.estado!=="Completada") return false;
-    if(filtroHist.edificio&&t.edificio!==filtroHist.edificio) return false;
-    if(filtroHist.depto&&t.depto!==filtroHist.depto) return false;
-    return true;
-  })));
+  // Próximos 7 días (solo activas, NO completadas)
+  const proximos7 = (() => {
+    const fin=new Date(); fin.setDate(fin.getDate()+7);
+    const finStr=fin.toISOString().slice(0,10);
+    return sortDesc(activas.filter(t=>t.fecha>=TODAY&&t.fecha<=finStr));
+  })();
 
   const TABS=[
-    {id:"dashboard",icon:"🏠",label:"Dashboard"},
+    {id:"dashboard",icon:"🏠",label:"Inicio"},
     {id:"tareas",icon:"✅",label:"Tareas"},
     {id:"semanal",icon:"📆",label:"Organización"},
     {id:"preventivo",icon:"🔧",label:"Preventivo"},
@@ -942,48 +1087,62 @@ export default function App(){
     {id:"config",icon:"⚙️",label:"Config"},
   ];
 
-  if(loading) return(
-    <div style={{fontFamily:"system-ui,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"#f4f3ef"}}>
-      <div style={{fontSize:48,marginBottom:16}}>🔧</div>
-      <p style={{fontSize:18,fontWeight:700,color:"#185FA5"}}>AlmaDesk</p>
-      <p style={{color:"#888",fontSize:14,marginTop:4}}>Conectando...</p>
-      <div style={{width:36,height:36,border:"4px solid #E6F1FB",borderTop:"4px solid #185FA5",borderRadius:"50%",animation:"spin 1s linear infinite",marginTop:20}}/>
+  if(loading)return(
+    <div style={{fontFamily:"system-ui,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:C.bg}}>
+      <div style={{fontSize:52,marginBottom:16}}>🔧</div>
+      <p style={{fontSize:20,fontWeight:800,color:C.blue,margin:"0 0 4px"}}>AlmaDesk</p>
+      <p style={{color:C.textMuted,fontSize:14,margin:0}}>Conectando a Firebase...</p>
+      <div style={{width:36,height:36,border:"4px solid #DBEAFE",borderTop:"4px solid "+C.blue,borderRadius:"50%",animation:"spin 1s linear infinite",marginTop:24}}/>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
 
   return(
-    <div style={{fontFamily:"system-ui,sans-serif",maxWidth:960,margin:"0 auto",paddingBottom:"3rem",background:"#f4f3ef",minHeight:"100vh"}}>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-
-      {toast&&<div style={{position:"fixed",top:14,right:14,zIndex:9999,background:toast.tipo==="err"?"#c0392b":"#185FA5",color:"#fff",borderRadius:10,padding:"10px 18px",fontSize:14,fontWeight:600,boxShadow:"0 4px 18px rgba(0,0,0,.2)",maxWidth:380}}>{toast.msg}</div>}
+    <div style={{fontFamily:"system-ui,-apple-system,sans-serif",maxWidth:1020,margin:"0 auto",paddingBottom:"3rem",background:C.bg,minHeight:"100vh"}}>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}} *{box-sizing:border-box}`}</style>
+      {toast&&<Toast msg={toast.msg} tipo={toast.tipo}/>}
       {deptoModal&&<ModalDepto edificio={deptoModal.edificio} depto={deptoModal.depto} tareas={tareas} onClose={()=>setDeptoModal(null)}/>}
-      {iniciarModal&&<ModalIniciarFecha tarea={iniciarModal} onConfirm={fecha=>confirmarIniciar(iniciarModal,fecha)} onClose={()=>setIniciarModal(null)}/>}
+      {iniciarModal&&<ModalIniciar tarea={iniciarModal} onConfirm={fecha=>confirmarIniciar(iniciarModal,fecha)} onClose={()=>setIniciarModal(null)}/>}
+      {showForm&&(
+        <Modal onClose={()=>{setShowForm(false);setEditando(null);}} wide title={editando?"Editar tarea":"Nueva tarea"}>
+          <TareaForm tarea={editando} edificios={edificios} tipos={tipos} personal={personal}
+            onSave={saveTarea} onClose={()=>{setShowForm(false);setEditando(null);}}/>
+        </Modal>
+      )}
 
-      <div style={{background:"linear-gradient(135deg,#0C447C,#185FA5)",padding:"1.25rem 2rem",borderRadius:"0 0 20px 20px",marginBottom:"1.25rem"}}>
+      {/* Header */}
+      <div style={{background:"linear-gradient(135deg,#1E3A8A,#2563EB)",padding:"1.25rem 1.5rem",borderRadius:"0 0 20px 20px",marginBottom:"1rem"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:"1rem"}}>
           <div>
-            <p style={{margin:0,fontWeight:700,fontSize:24,color:"#fff",letterSpacing:"-0.5px"}}>🔧 AlmaDesk</p>
-            <p style={{margin:0,fontSize:13,color:"rgba(255,255,255,0.75)"}}>Alma Rentals · {new Date().toLocaleDateString("es-AR",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</p>
+            <p style={{margin:0,fontWeight:800,fontSize:22,color:"#fff",letterSpacing:"-0.5px"}}>🔧 AlmaDesk</p>
+            <p style={{margin:"2px 0 0",fontSize:12,color:"rgba(255,255,255,0.7)"}}>
+              {new Date().toLocaleDateString("es-AR",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}
+            </p>
           </div>
-          <div style={{display:"flex",gap:"1.5rem",textAlign:"center"}}>
+          <div style={{display:"flex",gap:"1.25rem",textAlign:"center"}}>
             {[
-              {label:"Urgentes",val:urgentes.length,col:"#F09595"},
-              {label:"En curso",val:enCurso.length,col:"#85B7EB"},
-              {label:"Pendientes",val:tareas.filter(t=>t.estado==="Pendiente").length,col:"#FFB74D"}
+              {label:"Urgentes",val:urgentes.length,col:"#FCA5A5"},
+              {label:"En curso",val:enCurso.length,col:"#93C5FD"},
+              {label:"Pendientes",val:tareas.filter(t=>t.estado==="Pendiente").length,col:"#FCD34D"},
+              {label:"Completadas",val:completadas.length,col:"#6EE7B7"},
             ].map(c=>(
-              <div key={c.label}><p style={{margin:0,fontSize:22,fontWeight:700,color:c.col}}>{c.val}</p><p style={{margin:0,fontSize:12,color:"rgba(255,255,255,0.75)"}}>{c.label}</p></div>
+              <div key={c.label}>
+                <p style={{margin:0,fontSize:24,fontWeight:800,color:c.col}}>{c.val}</p>
+                <p style={{margin:0,fontSize:11,color:"rgba(255,255,255,0.7)"}}>{c.label}</p>
+              </div>
             ))}
           </div>
         </div>
       </div>
 
-      <div style={{display:"flex",gap:"0.4rem",padding:"0 1rem",marginBottom:"1.25rem",flexWrap:"wrap"}}>
+      {/* Tabs */}
+      <div style={{display:"flex",gap:4,padding:"0 1rem",marginBottom:"1rem",flexWrap:"wrap"}}>
         {TABS.map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)}
-            style={{padding:"8px 18px",borderRadius:24,fontSize:14,fontWeight:500,cursor:"pointer",
-              background:tab===t.id?"#185FA5":"#fff",color:tab===t.id?"#fff":"#333",
-              border:tab===t.id?"none":"1px solid #dddbd3"}}>
+            style={{padding:"8px 16px",borderRadius:24,fontSize:13,fontWeight:600,cursor:"pointer",transition:"all 0.15s",
+              background:tab===t.id?C.blue:"#fff",color:tab===t.id?"#fff":C.text,
+              border:tab===t.id?"none":`1px solid ${C.border}`,
+              boxShadow:tab===t.id?"0 2px 8px rgba(37,99,235,0.3)":C.shadow}}>
             {t.icon} {t.label}
           </button>
         ))}
@@ -994,61 +1153,74 @@ export default function App(){
         {/* ── DASHBOARD ── */}
         {tab==="dashboard"&&(
           <div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"1rem",marginBottom:"1.25rem"}}>
+            {/* KPIs */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"0.75rem",marginBottom:"1rem"}}>
               {[
-                {label:"Pendientes",val:tareas.filter(t=>t.estado==="Pendiente").length,bg:"#F1EFE8",text:"#444",border:"#B4B2A9"},
-                {label:"En curso",val:enCurso.length,bg:"#E6F1FB",text:"#185FA5",border:"#85B7EB"},
-                {label:"Urgentes",val:urgentes.length,bg:"#FCEBEB",text:"#A32D2D",border:"#F09595"},
-                {label:"Completadas",val:tareasComp.length,bg:"#EAF3DE",text:"#3B6D11",border:"#97C459"},
+                {label:"Pendientes",val:tareas.filter(t=>t.estado==="Pendiente").length,bg:"#F9FAFB",text:C.text,border:C.border,icon:"🕐"},
+                {label:"En curso",val:enCurso.length,bg:C.blueLight,text:C.blue,border:"#93C5FD",icon:"▶"},
+                {label:"Urgentes",val:urgentes.length,bg:"#FEF2F2",text:C.danger,border:"#FCA5A5",icon:"🔴"},
+                {label:"Completadas",val:completadas.length,bg:C.successLight,text:C.success,border:"#6EE7B7",icon:"✅"},
               ].map(c=>(
-                <div key={c.label} style={{background:c.bg,border:`1.5px solid ${c.border}`,borderRadius:12,padding:"1.25rem 1.5rem",textAlign:"center"}}>
-                  <p style={{margin:"0 0 4px",fontSize:13,color:c.text,fontWeight:500}}>{c.label}</p>
-                  <p style={{margin:0,fontSize:32,fontWeight:700,color:c.text}}>{c.val}</p>
+                <div key={c.label} style={{background:c.bg,border:`1.5px solid ${c.border}`,borderRadius:14,padding:"1.25rem",textAlign:"center",boxShadow:C.shadow}}>
+                  <p style={{margin:"0 0 4px",fontSize:24}}>{c.icon}</p>
+                  <p style={{margin:"0 0 3px",fontSize:28,fontWeight:800,color:c.text}}>{c.val}</p>
+                  <p style={{margin:0,fontSize:12,color:c.text,fontWeight:500,opacity:0.8}}>{c.label}</p>
                 </div>
               ))}
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem"}}>
-              <div style={S.section}>
-                <p style={{margin:"0 0 0.75rem",fontWeight:600,fontSize:15,color:"#A32D2D"}}>🔴 Urgentes activas</p>
-                {urgentes.length===0?<p style={{color:"#888",fontSize:14}}>Sin urgencias.</p>:urgentes.map(t=>(
-                  <div key={t.id} style={{padding:"8px 10px",background:"#fff",borderRadius:8,marginBottom:6,borderLeft:"4px solid #F09595"}}>
-                    <p style={{margin:0,fontWeight:500,fontSize:14}}>{t.titulo}</p>
-                    <p style={{margin:0,fontSize:12,color:"#888"}}>🏢 {t.edificio} · {t.depto} | 👤 {t.asignado}</p>
-                  </div>
-                ))}
-              </div>
-              <div style={S.section}>
-                <p style={{margin:"0 0 0.75rem",fontWeight:600,fontSize:15,color:"#854F0B"}}>⚠️ Con huésped</p>
-                {huesped.length===0?<p style={{color:"#888",fontSize:14}}>Sin alertas.</p>:huesped.map(t=>(
-                  <div key={t.id} style={{padding:"8px 10px",background:"#FAEEDA",borderRadius:8,marginBottom:6,borderLeft:"4px solid #EF9F27"}}>
-                    <p style={{margin:0,fontWeight:500,fontSize:14}}>{t.titulo}</p>
-                    <p style={{margin:0,fontSize:12,color:"#854F0B"}}>🏢 {t.edificio} · {t.depto}</p>
-                  </div>
-                ))}
-              </div>
-              <div style={S.section}>
-                <p style={{margin:"0 0 0.75rem",fontWeight:600,fontSize:15,color:"#185FA5"}}>▶ En curso</p>
-                {enCurso.length===0?<p style={{color:"#888",fontSize:14}}>Nada en ejecución.</p>:enCurso.map(t=>(
-                  <div key={t.id} style={{padding:"8px 10px",background:"#fff",borderRadius:8,marginBottom:6,borderLeft:"4px solid #85B7EB"}}>
-                    <p style={{margin:0,fontWeight:500,fontSize:14}}>{t.titulo}</p>
-                    <p style={{margin:0,fontSize:12,color:"#888"}}>👤 {t.asignado} · 📅 {FMT_DATE(t.fecha)}</p>
-                  </div>
-                ))}
-              </div>
-              <div style={S.section}>
-                <p style={{margin:"0 0 0.75rem",fontWeight:600,fontSize:15}}>📅 Próximos 7 días</p>
-                {(()=>{
-                  const fin=new Date();fin.setDate(fin.getDate()+7);
-                  const finStr=fin.toISOString().slice(0,10);
-                  const ts=sortDesc(tareasActivas.filter(t=>t.fecha>=TODAY&&t.fecha<=finStr));
-                  if(!ts.length) return <p style={{color:"#888",fontSize:14}}>Sin tareas próximas.</p>;
-                  return ts.map(t=>(
-                    <div key={t.id} style={{padding:"8px 10px",background:t.origen==="reporte"?"#FFF3E0":"#fff",borderRadius:8,marginBottom:6,borderLeft:`4px solid ${t.origen==="reporte"?"#FFB74D":urgStyle(t.urgencia).border}`}}>
-                      <p style={{margin:0,fontWeight:500,fontSize:14}}>{t.titulo}</p>
-                      <p style={{margin:0,fontSize:12,color:"#888"}}>🏢 {t.edificio} · {FMT_DATE(t.fecha)}</p>
+
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0.75rem"}}>
+              {/* Urgentes */}
+              <div style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:14,padding:"1rem",boxShadow:C.shadow}}>
+                <p style={{margin:"0 0 0.75rem",fontWeight:700,fontSize:14,color:C.danger,display:"flex",alignItems:"center",gap:6}}><span>🔴</span> Urgentes activas</p>
+                {urgentes.length===0
+                  ? <p style={{color:C.textMuted,fontSize:13}}>Sin urgencias activas ✓</p>
+                  : urgentes.map(t=>(
+                    <div key={t.id} style={{padding:"8px 10px",background:"#FEF2F2",borderRadius:10,marginBottom:6,borderLeft:`3px solid ${C.danger}`}}>
+                      <p style={{margin:"0 0 2px",fontWeight:700,fontSize:13,color:C.text}}>{t.titulo}</p>
+                      <p style={{margin:0,fontSize:11,color:C.textMuted}}>🏢 {t.edificio}·{t.depto} · 👤 {t.asignado}</p>
                     </div>
-                  ));
-                })()}
+                  ))
+                }
+              </div>
+              {/* Con huésped */}
+              <div style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:14,padding:"1rem",boxShadow:C.shadow}}>
+                <p style={{margin:"0 0 0.75rem",fontWeight:700,fontSize:14,color:C.warn,display:"flex",alignItems:"center",gap:6}}><span>⚠️</span> Con huésped</p>
+                {huesped.length===0
+                  ? <p style={{color:C.textMuted,fontSize:13}}>Sin alertas de huésped ✓</p>
+                  : huesped.map(t=>(
+                    <div key={t.id} style={{padding:"8px 10px",background:C.warnLight,borderRadius:10,marginBottom:6,borderLeft:`3px solid ${C.warn}`}}>
+                      <p style={{margin:"0 0 2px",fontWeight:700,fontSize:13,color:C.text}}>{t.titulo}</p>
+                      <p style={{margin:0,fontSize:11,color:C.textMuted}}>🏢 {t.edificio}·{t.depto}</p>
+                    </div>
+                  ))
+                }
+              </div>
+              {/* En curso */}
+              <div style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:14,padding:"1rem",boxShadow:C.shadow}}>
+                <p style={{margin:"0 0 0.75rem",fontWeight:700,fontSize:14,color:C.blue,display:"flex",alignItems:"center",gap:6}}><span>▶</span> En ejecución</p>
+                {enCurso.length===0
+                  ? <p style={{color:C.textMuted,fontSize:13}}>Nada en ejecución actualmente.</p>
+                  : enCurso.map(t=>(
+                    <div key={t.id} style={{padding:"8px 10px",background:C.blueLight,borderRadius:10,marginBottom:6,borderLeft:`3px solid ${C.blue}`}}>
+                      <p style={{margin:"0 0 2px",fontWeight:700,fontSize:13,color:C.text}}>{t.titulo}</p>
+                      <p style={{margin:0,fontSize:11,color:C.textMuted}}>👤 {t.asignado} · 📅 {fmtDate(t.fecha)}</p>
+                    </div>
+                  ))
+                }
+              </div>
+              {/* Próximos 7 días — SOLO activas */}
+              <div style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:14,padding:"1rem",boxShadow:C.shadow}}>
+                <p style={{margin:"0 0 0.75rem",fontWeight:700,fontSize:14,color:C.text,display:"flex",alignItems:"center",gap:6}}><span>📅</span> Próximos 7 días</p>
+                {proximos7.length===0
+                  ? <p style={{color:C.textMuted,fontSize:13}}>Sin tareas programadas próximamente.</p>
+                  : proximos7.map(t=>(
+                    <div key={t.id} style={{padding:"8px 10px",background:"#F9FAFB",borderRadius:10,marginBottom:6,borderLeft:`3px solid ${urgStyle(t.urgencia).dot}`}}>
+                      <p style={{margin:"0 0 2px",fontWeight:700,fontSize:13,color:C.text}}>{t.titulo}</p>
+                      <p style={{margin:0,fontSize:11,color:C.textMuted}}>🏢 {t.edificio}·{t.depto} · 📅 {fmtDate(t.fecha)}</p>
+                    </div>
+                  ))
+                }
               </div>
             </div>
           </div>
@@ -1058,79 +1230,78 @@ export default function App(){
         {tab==="tareas"&&(
           <div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem"}}>
-              <p style={{margin:0,fontWeight:500,fontSize:16}}>Tareas activas ({tareasF.length})</p>
-              <button onClick={()=>{setEditando(null);setShowForm(true);}} style={{...S.btn("#185FA5","#fff"),fontSize:15,padding:"9px 20px"}}>+ Nueva tarea</button>
+              <p style={{margin:0,fontWeight:700,fontSize:16}}>Tareas activas <span style={{color:C.textMuted,fontWeight:400}}>({tareasF.length})</span></p>
+              <button onClick={()=>{setEditando(null);setShowForm(true);}} style={{...btn(C.blue,"#fff",C.blue),fontWeight:700,padding:"10px 20px"}}>✚ Nueva tarea</button>
             </div>
-            <div style={{...S.section,padding:"1rem 1.25rem",marginBottom:"1rem"}}>
-              <p style={{margin:"0 0 0.75rem",fontSize:13,fontWeight:500,color:"#888"}}>FILTROS</p>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"0.75rem",marginBottom:"0.5rem"}}>
-                <div>
-                  <select style={{...S.input,fontSize:13}} value={filtro.edificio} onChange={e=>setFiltro(p=>({...p,edificio:e.target.value,depto:""}))}>
-                    <option value="">Edificio (todos)</option>
-                    {Object.keys(edificios).map(o=><option key={o}>{o}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <select style={{...S.input,fontSize:13}} value={filtro.depto} onChange={e=>setFiltro(p=>({...p,depto:e.target.value}))} disabled={!filtro.edificio}>
-                    <option value="">Dpto / Sector (todos)</option>
-                    {deptosParaFiltro.map(o=><option key={o}>{o}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <select style={{...S.input,fontSize:13}} value={filtro.estado} onChange={e=>setFiltro(p=>({...p,estado:e.target.value}))}>
-                    <option value="">Estado (todos)</option>
-                    {["Pendiente","Asignada","En curso","Pausada"].map(o=><option key={o}>{o}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <select style={{...S.input,fontSize:13}} value={filtro.urgencia} onChange={e=>setFiltro(p=>({...p,urgencia:e.target.value}))}>
-                    <option value="">Urgencia (todos)</option>
-                    {URGENCIAS.map(u=><option key={u.label}>{u.label}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <select style={{...S.input,fontSize:13}} value={filtro.tipo} onChange={e=>setFiltro(p=>({...p,tipo:e.target.value}))}>
-                    <option value="">Tipo (todos)</option>
-                    {tipos.map(o=><option key={o}>{o}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <select style={{...S.input,fontSize:13}} value={filtro.asignado} onChange={e=>setFiltro(p=>({...p,asignado:e.target.value}))}>
-                    <option value="">Asignado (todos)</option>
-                    {personal.map(o=><option key={o}>{o}</option>)}
-                  </select>
-                </div>
+            {/* Filtros */}
+            <div style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:12,padding:"1rem",marginBottom:"1rem",boxShadow:C.shadow}}>
+              <p style={{margin:"0 0 0.6rem",fontSize:11,fontWeight:700,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em"}}>Filtros</p>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"0.6rem",marginBottom:"0.5rem"}}>
+                <select style={{...inp,fontSize:13}} value={filtro.edificio} onChange={e=>setFiltro(p=>({...p,edificio:e.target.value,depto:""}))}>
+                  <option value="">Edificio (todos)</option>
+                  {Object.keys(edificios).map(o=><option key={o}>{o}</option>)}
+                </select>
+                <select style={{...inp,fontSize:13}} value={filtro.depto} onChange={e=>setFiltro(p=>({...p,depto:e.target.value}))} disabled={!filtro.edificio}>
+                  <option value="">Dpto (todos)</option>
+                  {deptosParaFiltro.map(o=><option key={o}>{o}</option>)}
+                </select>
+                <select style={{...inp,fontSize:13}} value={filtro.estado} onChange={e=>setFiltro(p=>({...p,estado:e.target.value}))}>
+                  <option value="">Estado (todos)</option>
+                  {["Pendiente","Asignada","En curso","Pausada"].map(o=><option key={o}>{o}</option>)}
+                </select>
+                <select style={{...inp,fontSize:13}} value={filtro.urgencia} onChange={e=>setFiltro(p=>({...p,urgencia:e.target.value}))}>
+                  <option value="">Urgencia (todos)</option>
+                  {URGENCIAS.map(u=><option key={u.label}>{u.label}</option>)}
+                </select>
+                <select style={{...inp,fontSize:13}} value={filtro.tipo} onChange={e=>setFiltro(p=>({...p,tipo:e.target.value}))}>
+                  <option value="">Tipo (todos)</option>
+                  {tipos.map(o=><option key={o}>{o}</option>)}
+                </select>
+                <select style={{...inp,fontSize:13}} value={filtro.asignado} onChange={e=>setFiltro(p=>({...p,asignado:e.target.value}))}>
+                  <option value="">Asignado (todos)</option>
+                  {personal.map(o=><option key={o}>{o}</option>)}
+                </select>
               </div>
+              {Object.values(filtro).some(Boolean)&&(
+                <button onClick={()=>setFiltro({edificio:"",depto:"",urgencia:"",estado:"",tipo:"",asignado:""})}
+                  style={{...btn(),fontSize:12,padding:"5px 12px",color:C.danger,borderColor:"#FCA5A5"}}>✕ Limpiar filtros</button>
+              )}
             </div>
             {tareasF.length===0
-              ?<p style={{textAlign:"center",color:"#888",marginTop:"2rem",fontSize:15}}>No hay tareas con esos filtros.</p>
-              :tareasF.map(t=><TareaCard key={t.id} t={t} onEdit={tt=>{setEditando(tt);setShowForm(true);}} onEstado={cambiarEstado} onDelete={eliminarTarea} onComentario={guardarComentario} onIniciar={handleIniciar}/>)
+              ? <div style={{textAlign:"center",padding:"3rem",color:C.textMuted}}><p style={{fontSize:40}}>✅</p><p>No hay tareas con esos filtros.</p></div>
+              : tareasF.map(t=><TareaCard key={t.id} t={t}
+                  onEdit={tt=>{setEditando(tt);setShowForm(true);}}
+                  onEstado={cambiarEstado} onDelete={eliminarTarea}
+                  onComentario={guardarComentario} onIniciar={tt=>setIniciarModal(tt)}/>)
             }
           </div>
         )}
 
         {/* ── ORGANIZACIÓN ── */}
         {tab==="semanal"&&(
-          <div style={S.section}>
-            <VistaSemanal tareas={tareasActivas} onMoverTarea={moverTarea} onEdit={tt=>{setEditando(tt);setShowForm(true);}} onQuitarDia={quitarDiaTarea}/>
+          <div style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:16,padding:"1.25rem",boxShadow:C.shadow}}>
+            <VistaSemanal tareas={activas} onMoverTarea={moverTarea}
+              onEdit={tt=>{setEditando(tt);setShowForm(true);}}
+              onQuitarDia={quitarDia} onEstado={cambiarEstado}
+              onIniciar={tt=>setIniciarModal(tt)}/>
           </div>
         )}
 
         {/* ── PREVENTIVO ── */}
         {tab==="preventivo"&&(
-          <div style={S.section}>
-            <Preventivo edificios={edificios} prevData={prevData} savePrevData={savePrevData} showToast={showToast}/>
+          <div style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:16,padding:"1.25rem",boxShadow:C.shadow}}>
+            <Preventivo edificios={edificios} prevData={prevData} savePrevData={savePrevData} showToast={showToast} tareasCompletadas={completadas}/>
           </div>
         )}
 
         {/* ── EDIFICIOS ── */}
         {tab==="edificios"&&(
           <div>
-            {Object.keys(edificios).map(ed=>(
-              <div key={ed} style={S.section}>
-                <p style={{margin:"0 0 1rem",fontWeight:500,fontSize:16}}>🏢 {ed}</p>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:"0.6rem"}}>
-                  {(edificios[ed]||[]).map(d=>{
+            {Object.entries(edificios).map(([ed,ds])=>(
+              <div key={ed} style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:16,padding:"1.25rem",marginBottom:"0.75rem",boxShadow:C.shadow}}>
+                <p style={{margin:"0 0 1rem",fontWeight:700,fontSize:16}}>🏢 {ed} <span style={{color:C.textMuted,fontWeight:400,fontSize:13}}>({ds.length} deptos)</span></p>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:"0.5rem"}}>
+                  {ds.map(d=>{
                     const alerta=tareas.some(t=>t.edificio===ed&&t.depto===d&&t.huespedAlerta&&t.estado!=="Completada");
                     const ts=tareas.filter(t=>t.edificio===ed&&t.depto===d&&t.estado!=="Completada");
                     const urg=ts.some(t=>t.urgencia==="Urgente");
@@ -1138,15 +1309,20 @@ export default function App(){
                     const histCount=tareas.filter(t=>t.edificio===ed&&t.depto===d&&t.estado==="Completada").length;
                     return(
                       <div key={d} onClick={()=>setDeptoModal({edificio:ed,depto:d})}
-                        style={{background:alerta?"#FAECE7":urg?"#FCEBEB":desdeRep?"#FFF3E0":"#fff",border:`1.5px solid ${alerta?"#F5C4B3":urg?"#F09595":desdeRep?"#FFB74D":"#dddbd3"}`,borderRadius:10,padding:"0.75rem",textAlign:"center",cursor:"pointer",transition:"transform 0.15s,box-shadow 0.15s"}}
-                        onMouseEnter={e=>{e.currentTarget.style.transform="scale(1.04)";e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,0.12)";}}
-                        onMouseLeave={e=>{e.currentTarget.style.transform="scale(1)";e.currentTarget.style.boxShadow="none";}}>
-                        <p style={{margin:"0 0 4px",fontWeight:600,fontSize:15}}>{d}</p>
-                        {alerta&&<p style={{margin:"0 0 2px",fontSize:11,color:"#993C1D"}}>⚠ Huésped</p>}
-                        {desdeRep&&<p style={{margin:"0 0 2px",fontSize:11,color:"#E65100"}}>🔗 Reporte</p>}
-                        {ts.length>0?<span style={S.tag(urg?"#FCEBEB":"#E6F1FB",urg?"#A32D2D":"#185FA5",urg?"#F09595":"#85B7EB")}>{ts.length} activa{ts.length>1?"s":""}</span>:<span style={{fontSize:12,color:"#aaa"}}>Libre</span>}
-                        {histCount>0&&<p style={{margin:"4px 0 0",fontSize:11,color:"#aaa"}}>📋 {histCount} completada{histCount>1?"s":""}</p>}
-                        <p style={{margin:"4px 0 0",fontSize:11,color:"#185FA5",fontWeight:500}}>Ver historial →</p>
+                        style={{background:urg?"#FEF2F2":alerta?"#FEF3C7":desdeRep?"#FFFBEB":"#F9FAFB",
+                          border:`1.5px solid ${urg?"#FCA5A5":alerta?"#FCD34D":desdeRep?"#FCD34D":C.border}`,
+                          borderRadius:12,padding:"0.75rem",textAlign:"center",cursor:"pointer",transition:"all 0.15s"}}
+                        onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow=C.shadowMd;}}
+                        onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="none";}}>
+                        <p style={{margin:"0 0 3px",fontWeight:700,fontSize:14,color:C.text}}>{d}</p>
+                        {urg&&<p style={{margin:"0 0 2px",fontSize:10,color:C.danger,fontWeight:600}}>🔴 URGENTE</p>}
+                        {alerta&&<p style={{margin:"0 0 2px",fontSize:10,color:C.warn,fontWeight:600}}>⚠ Huésped</p>}
+                        {desdeRep&&<p style={{margin:"0 0 2px",fontSize:10,color:C.warn,fontWeight:600}}>🔗 Reporte</p>}
+                        {ts.length>0
+                          ? <Badge label={`${ts.length} activa${ts.length>1?"s":""}`} bg={urg?"#FEE2E2":C.blueLight} text={urg?C.danger:C.blue} border={urg?"#FCA5A5":"#93C5FD"}/>
+                          : <span style={{fontSize:11,color:C.success,fontWeight:600}}>✓ Libre</span>
+                        }
+                        {histCount>0&&<p style={{margin:"4px 0 0",fontSize:10,color:C.textLight}}>📋 {histCount} completada{histCount>1?"s":""}</p>}
                       </div>
                     );
                   })}
@@ -1158,39 +1334,22 @@ export default function App(){
 
         {/* ── HISTORIAL ── */}
         {tab==="historial"&&(
-          <div>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem",flexWrap:"wrap",gap:"0.5rem"}}>
-              <p style={{margin:0,fontWeight:500,fontSize:16}}>Historial de tareas completadas ({tareasHistF.length})</p>
-            </div>
-            {/* Filtros de historial */}
-            <div style={{...S.section,padding:"1rem 1.25rem",marginBottom:"1rem"}}>
-              <p style={{margin:"0 0 0.75rem",fontSize:13,fontWeight:500,color:"#888"}}>FILTRAR HISTORIAL</p>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0.75rem"}}>
-                <select style={{...S.input,fontSize:13}} value={filtroHist.edificio} onChange={e=>setFiltroHist(p=>({...p,edificio:e.target.value,depto:""}))}>
-                  <option value="">Edificio (todos)</option>
-                  {Object.keys(edificios).map(o=><option key={o}>{o}</option>)}
-                </select>
-                <select style={{...S.input,fontSize:13}} value={filtroHist.depto} onChange={e=>setFiltroHist(p=>({...p,depto:e.target.value}))} disabled={!filtroHist.edificio}>
-                  <option value="">Departamento (todos)</option>
-                  {deptosParaHistFiltro.map(o=><option key={o}>{o}</option>)}
-                </select>
-              </div>
-            </div>
-            {tareasHistF.length===0
-              ?<p style={{textAlign:"center",color:"#888",fontSize:15,marginTop:"2rem"}}>Aún no hay completadas con esos filtros.</p>
-              :tareasHistF.map(t=><TareaCard key={t.id} t={t} onEdit={tt=>{setEditando(tt);setShowForm(true);}} onEstado={cambiarEstado} onDelete={eliminarTarea} onComentario={guardarComentario} onIniciar={handleIniciar}/>)
-            }
-          </div>
+          <Historial tareas={tareas} edificios={edificios}
+            onEdit={tt=>{setEditando(tt);setShowForm(true);}}
+            onEstado={cambiarEstado} onDelete={eliminarTarea}
+            onComentario={guardarComentario} onIniciar={tt=>setIniciarModal(tt)}/>
         )}
 
         {/* ── CONFIG ── */}
         {tab==="config"&&(
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"1rem"}}>
-            <div style={S.section}>
-              <p style={{margin:"0 0 1rem",fontWeight:500,fontSize:15}}>🏢 Edificios y departamentos</p>
-              <div style={{background:"#E6F1FB",border:"1px solid #85B7EB",borderRadius:10,padding:"0.75rem 1rem",marginBottom:"1rem"}}>
-                <p style={{margin:"0 0 6px",fontSize:13,fontWeight:600,color:"#185FA5"}}>📂 Importar desde CSV</p>
-                <p style={{margin:"0 0 8px",fontSize:12,color:"#555"}}>Columnas: <b>Edificio</b> y <b>Departamento</b></p>
+            {/* Edificios */}
+            <div style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:16,padding:"1.25rem",boxShadow:C.shadow}}>
+              <p style={{margin:"0 0 1rem",fontWeight:700,fontSize:15}}>🏢 Edificios y departamentos</p>
+              {/* Import CSV */}
+              <div style={{background:C.blueLight,border:`1px solid #93C5FD`,borderRadius:10,padding:"0.75rem",marginBottom:"1rem"}}>
+                <p style={{margin:"0 0 4px",fontSize:12,fontWeight:700,color:C.blue}}>📂 Importar desde CSV</p>
+                <p style={{margin:"0 0 6px",fontSize:11,color:C.textMuted}}>Columnas: <b>Edificio</b> y <b>Departamento</b></p>
                 <input type="file" accept=".csv" onChange={async e=>{
                   const file=e.target.files[0];if(!file)return;
                   const text=await file.text();
@@ -1198,7 +1357,7 @@ export default function App(){
                   if(lines.length<2){showToast("CSV vacío","err");return;}
                   const delim=lines[0].includes(";")?";":",";
                   const headers=lines[0].split(delim).map(h=>h.trim().toLowerCase().replace(/"/g,""));
-                  const iEd=headers.findIndex(h=>h.includes("edif")||h.includes("build")||h==="ed");
+                  const iEd=headers.findIndex(h=>h.includes("edif")||h==="ed");
                   const iDep=headers.findIndex(h=>h.includes("dep")||h.includes("apt")||h.includes("unidad")||h.includes("unit")||h.includes("hab"));
                   if(iEd===-1||iDep===-1){showToast("No encontré columnas Edificio y Departamento","err");e.target.value="";return;}
                   const upd=JSON.parse(JSON.stringify(edificios));
@@ -1213,42 +1372,42 @@ export default function App(){
                     upd[ed].push(dep);nuevos++;
                   });
                   await saveEdificios(upd);
-                  showToast(`✅ ${nuevos} deptos importados${dup>0?`, ${dup} duplicados omitidos`:""}`);
+                  showToast(`✅ ${nuevos} deptos importados${dup>0?`, ${dup} omitidos`:""}`);
                   e.target.value="";
-                }} style={{...S.input,padding:"6px",fontSize:13,cursor:"pointer"}}/>
+                }} style={{...inp,padding:"5px",fontSize:12,cursor:"pointer"}}/>
               </div>
-              <div style={{display:"flex",gap:"0.5rem",marginBottom:"0.75rem"}}>
-                <input style={{...S.input,flex:1}} placeholder="Nuevo edificio" value={newEdificio} onChange={e=>setNewEdificio(e.target.value)}/>
+              <div style={{display:"flex",gap:"0.5rem",marginBottom:"0.6rem"}}>
+                <input style={{...inp,flex:1,fontSize:13}} placeholder="Nuevo edificio (ej: MAD)" value={newEdificio} onChange={e=>setNewEdificio(e.target.value)}/>
                 <button onClick={async()=>{
                   if(!newEdificio.trim())return;
-                  const key=newEdificio.trim().toUpperCase();
-                  if(edificios[key]){showToast("Ese edificio ya existe","err");return;}
-                  await saveEdificios({...edificios,[key]:[]});setNewEdificio("");
-                }} style={S.btn("#185FA5","#fff")}>+ Edificio</button>
+                  const k=newEdificio.trim().toUpperCase();
+                  if(edificios[k]){showToast("Ya existe","err");return;}
+                  await saveEdificios({...edificios,[k]:[]});setNewEdificio("");
+                }} style={btn(C.blue,"#fff",C.blue)}>+ Edificio</button>
               </div>
               <div style={{display:"flex",gap:"0.5rem",marginBottom:"1rem",flexWrap:"wrap"}}>
-                <select style={{...S.input,width:"auto",flex:1}} value={newDepto.ed} onChange={e=>setNewDepto(p=>({...p,ed:e.target.value}))}>
+                <select style={{...inp,width:"auto",flex:"0 0 auto",fontSize:13}} value={newDepto.ed} onChange={e=>setNewDepto(p=>({...p,ed:e.target.value}))}>
                   {Object.keys(edificios).map(b=><option key={b}>{b}</option>)}
                 </select>
-                <input style={{...S.input,flex:2}} placeholder="Número o nombre del dpto" value={newDepto.nombre} onChange={e=>setNewDepto(p=>({...p,nombre:e.target.value}))}/>
+                <input style={{...inp,flex:1,fontSize:13}} placeholder="Número o nombre del dpto" value={newDepto.nombre} onChange={e=>setNewDepto(p=>({...p,nombre:e.target.value}))}/>
                 <button onClick={async()=>{
                   if(!newDepto.nombre.trim())return;
                   const dep=newDepto.nombre.trim();
-                  if((edificios[newDepto.ed]||[]).includes(dep)){showToast("Ese dpto ya existe","err");return;}
+                  if((edificios[newDepto.ed]||[]).includes(dep)){showToast("Ya existe","err");return;}
                   await saveEdificios({...edificios,[newDepto.ed]:[...(edificios[newDepto.ed]||[]),dep]});
                   setNewDepto(p=>({...p,nombre:""}));
-                }} style={S.btn("#3B6D11","#fff")}>+ Dpto</button>
+                }} style={btn(C.success,"#fff",C.success)}>+ Dpto</button>
               </div>
               {Object.entries(edificios).map(([ed,ds])=>(
-                <div key={ed} style={{marginBottom:"0.75rem"}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                    <p style={{margin:0,fontWeight:600,fontSize:13,color:"#444"}}>{ed} <span style={{color:"#888",fontWeight:400}}>({ds.length} deptos)</span></p>
-                    <button onClick={async()=>{if(!window.confirm(`¿Eliminar ${ed}?`))return;const u={...edificios};delete u[ed];await saveEdificios(u);}} style={{...S.btn("#FCEBEB","#A32D2D"),padding:"3px 8px",fontSize:11,border:"1px solid #F09595"}}>🗑️</button>
+                <div key={ed} style={{marginBottom:"0.75rem",background:"#F9FAFB",borderRadius:10,padding:"0.75rem"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                    <p style={{margin:0,fontWeight:700,fontSize:13}}>{ed} <span style={{color:C.textMuted,fontWeight:400}}>({ds.length})</span></p>
+                    <button onClick={async()=>{if(!window.confirm(`¿Eliminar ${ed}?`))return;const u={...edificios};delete u[ed];await saveEdificios(u);}} style={{...btn("#FEF2F2",C.danger,"#FCA5A5"),padding:"3px 8px",fontSize:11}}>🗑️</button>
                   </div>
                   <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
                     {ds.map(d=>(
-                      <span key={d} style={{...S.tag("#F1EFE8","#444","#B4B2A9"),display:"flex",alignItems:"center",gap:4}}>
-                        {d}<button onClick={async()=>await saveEdificios({...edificios,[ed]:edificios[ed].filter(x=>x!==d)})} style={{background:"none",border:"none",cursor:"pointer",color:"#888",fontSize:12,padding:0}}>✕</button>
+                      <span key={d} style={{...pill("#F3F4F6",C.text,C.border),display:"flex",alignItems:"center",gap:4,fontSize:12}}>
+                        {d}<button onClick={async()=>await saveEdificios({...edificios,[ed]:edificios[ed].filter(x=>x!==d)})} style={{background:"none",border:"none",cursor:"pointer",color:C.danger,fontSize:11,padding:0,lineHeight:1}}>✕</button>
                       </span>
                     ))}
                   </div>
@@ -1257,60 +1416,56 @@ export default function App(){
             </div>
 
             <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
-              <div style={S.section}>
-                <p style={{margin:"0 0 1rem",fontWeight:500,fontSize:15}}>🔧 Tipos de tarea</p>
-                <div style={{display:"flex",gap:"0.5rem",marginBottom:"1rem"}}>
-                  <input style={{...S.input,flex:1}} placeholder="Nuevo tipo" value={newTipo} onChange={e=>setNewTipo(e.target.value)}/>
-                  <button onClick={async()=>{if(!newTipo.trim())return;await saveTipos([...tipos,newTipo.trim()]);setNewTipo("");}} style={S.btn("#534AB7","#fff")}>+ Agregar</button>
+              {/* Tipos */}
+              <div style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:16,padding:"1.25rem",boxShadow:C.shadow}}>
+                <p style={{margin:"0 0 0.75rem",fontWeight:700,fontSize:15}}>🔧 Tipos de tarea</p>
+                <div style={{display:"flex",gap:"0.5rem",marginBottom:"0.75rem"}}>
+                  <input style={{...inp,flex:1,fontSize:13}} placeholder="Nuevo tipo..." value={newTipo} onChange={e=>setNewTipo(e.target.value)}/>
+                  <button onClick={async()=>{if(!newTipo.trim())return;await saveTipos([...tipos,newTipo.trim()]);setNewTipo("");}} style={btn(C.purple,"#fff",C.purple)}>+ Agregar</button>
                 </div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
                   {tipos.map(t=>(
-                    <span key={t} style={{...S.tag("#EEEDFE","#534AB7","#AFA9EC"),display:"flex",alignItems:"center",gap:4}}>
-                      {t}<button onClick={async()=>await saveTipos(tipos.filter(x=>x!==t))} style={{background:"none",border:"none",cursor:"pointer",color:"#534AB7",fontSize:12,padding:0}}>✕</button>
+                    <span key={t} style={{...pill(C.purpleLight,C.purple,"#C4B5FD"),display:"flex",alignItems:"center",gap:4,fontSize:12}}>
+                      {t}<button onClick={async()=>await saveTipos(tipos.filter(x=>x!==t))} style={{background:"none",border:"none",cursor:"pointer",color:C.danger,fontSize:11,padding:0}}>✕</button>
                     </span>
                   ))}
                 </div>
               </div>
-
-              {/* Gestión de personal */}
-              <div style={S.section}>
-                <p style={{margin:"0 0 1rem",fontWeight:500,fontSize:15}}>👤 Personal / Asignados</p>
-                <div style={{display:"flex",gap:"0.5rem",marginBottom:"1rem"}}>
-                  <input style={{...S.input,flex:1}} placeholder="Nombre o rol" value={newPersonal} onChange={e=>setNewPersonal(e.target.value)}/>
-                  <button onClick={async()=>{
-                    const n=newPersonal.trim();
-                    if(!n||personal.includes(n))return;
-                    await savePersonal([...personal,n]);setNewPersonal("");
-                  }} style={S.btn("#185FA5","#fff")}>+ Agregar</button>
+              {/* Personal */}
+              <div style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:16,padding:"1.25rem",boxShadow:C.shadow}}>
+                <p style={{margin:"0 0 0.75rem",fontWeight:700,fontSize:15}}>👤 Personal / Asignados</p>
+                <div style={{display:"flex",gap:"0.5rem",marginBottom:"0.75rem"}}>
+                  <input style={{...inp,flex:1,fontSize:13}} placeholder="Nombre o rol..." value={newPersonal} onChange={e=>setNewPersonal(e.target.value)}/>
+                  <button onClick={async()=>{const n=newPersonal.trim();if(!n||personal.includes(n))return;await savePersonal([...personal,n]);setNewPersonal("");}} style={btn(C.blue,"#fff",C.blue)}>+ Agregar</button>
                 </div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
                   {personal.map(p=>(
-                    <span key={p} style={{...S.tag("#E6F1FB","#185FA5","#85B7EB"),display:"flex",alignItems:"center",gap:4}}>
-                      {p}
-                      <button onClick={async()=>{
-                        if(!window.confirm(`¿Eliminar a "${p}" de los asignados? Las tareas existentes no se modifican.`))return;
-                        await savePersonal(personal.filter(x=>x!==p));
-                      }} style={{background:"none",border:"none",cursor:"pointer",color:"#A32D2D",fontSize:12,padding:0}}>✕</button>
+                    <span key={p} style={{...pill(C.blueLight,C.blue,"#93C5FD"),display:"flex",alignItems:"center",gap:4,fontSize:12}}>
+                      {p}<button onClick={async()=>{if(!window.confirm(`¿Eliminar a "${p}"?`))return;await savePersonal(personal.filter(x=>x!==p));}} style={{background:"none",border:"none",cursor:"pointer",color:C.danger,fontSize:11,padding:0}}>✕</button>
                     </span>
                   ))}
                 </div>
               </div>
-
-              <div style={S.section}>
-                <p style={{margin:"0 0 0.75rem",fontWeight:500,fontSize:14}}>🔗 Estado de integraciones</p>
-                <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                  <div style={{background:"#EAF3DE",border:"1px solid #97C459",borderRadius:8,padding:"8px 12px",fontSize:13,color:"#3B6D11"}}>✅ Firebase AlmaDesk conectado</div>
-                  <div style={{background:"#EAF3DE",border:"1px solid #97C459",borderRadius:8,padding:"8px 12px",fontSize:13,color:"#3B6D11"}}>✅ App de Limpieza (solo lectura) conectada</div>
-                  <div style={{background:"#E6F1FB",border:"1px solid #85B7EB",borderRadius:8,padding:"8px 12px",fontSize:13,color:"#185FA5"}}>🔄 Polling: cada 60 segundos</div>
-                  <div style={{background:"#FFF3E0",border:"1px solid #FFB74D",borderRadius:8,padding:"8px 12px",fontSize:13,color:"#E65100",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <span>🔗 Procesados: {procesadosIds.size}</span>
+              {/* Integraciones */}
+              <div style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:16,padding:"1.25rem",boxShadow:C.shadow}}>
+                <p style={{margin:"0 0 0.75rem",fontWeight:700,fontSize:15}}>🔗 Integraciones</p>
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  {[
+                    {bg:C.successLight,text:C.success,border:"#6EE7B7",label:"✅ Firebase AlmaDesk conectado"},
+                    {bg:C.successLight,text:C.success,border:"#6EE7B7",label:"✅ App Limpieza (lectura) conectada"},
+                    {bg:C.blueLight,text:C.blue,border:"#93C5FD",label:"🔄 Sincronización: cada 60 segundos"},
+                  ].map((s,i)=>(
+                    <div key={i} style={{background:s.bg,border:`1px solid ${s.border}`,borderRadius:8,padding:"8px 12px",fontSize:13,color:s.text,fontWeight:500}}>{s.label}</div>
+                  ))}
+                  <div style={{background:C.warnLight,border:`1px solid #FCD34D`,borderRadius:8,padding:"8px 12px",fontSize:13,color:C.warn,fontWeight:500,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span>🔗 Reportes procesados: {procesadosIds.size}</span>
                     <button onClick={async()=>{
-                      if(!window.confirm("¿Reprocesar? Solo crea tareas que no existan aún."))return;
+                      if(!window.confirm("¿Reprocesar reportes? Solo crea tareas nuevas."))return;
                       procesadosRef.current=new Set();setProcesadosIds(new Set());
                       await aSet("alma_procesados",[]);
-                      showToast("✅ Reprocesando...");
+                      showToast("🔄 Reprocesando...");
                       setTimeout(checkReportes,2000);
-                    }} style={{...S.btn("#E65100","#fff"),fontSize:11,padding:"4px 10px"}}>🔄 Reprocesar</button>
+                    }} style={{...btn(C.warnLight,C.warn,"#FCD34D"),fontSize:11,padding:"4px 10px"}}>🔄 Reprocesar</button>
                   </div>
                 </div>
               </div>
@@ -1318,12 +1473,6 @@ export default function App(){
           </div>
         )}
       </div>
-
-      {showForm&&(
-        <Modal onClose={()=>{setShowForm(false);setEditando(null);}} wide>
-          <TareaForm tarea={editando} edificios={edificios} tipos={tipos} personal={personal} onSave={saveTarea} onClose={()=>{setShowForm(false);setEditando(null);}}/>
-        </Modal>
-      )}
     </div>
   );
 }
